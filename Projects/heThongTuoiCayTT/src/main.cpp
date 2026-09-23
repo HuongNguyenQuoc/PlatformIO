@@ -1,10 +1,13 @@
 #include <Arduino.h>
 #include <LiquidCrystal.h>
 
-// Khoi tao LCD theo cac chan: RS=12, E=11, D4=5, D5=4, D6=3, D7=2
+// Khoi tao LCD 1602 theo cac chan:
+// LiquidCrystal(RS, Enable, D4, D5, D6, D7)
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
 void setup() {
+  Serial.begin(9600);
+  
   lcd.begin(16, 2);
   lcd.clear();
   
@@ -16,5 +19,5 @@ void setup() {
 }
 
 void loop() {
-  // Chuong trinh test giu nguyen chu tren man hinh
+  // Giu nguyen chu tren man hinh
 }
