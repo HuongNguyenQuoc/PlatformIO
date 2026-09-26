@@ -20,7 +20,7 @@ int waterValue = 746; // Gia tri RAW khi nhung cam bien vao nuoc (100%)
 const int SAMPLE_COUNT = 10; // So lan doc de lay trung binh
 
 // Nguong tuoi: duoi LOW thi bat dau tuoi, tren HIGH thi dung tuoi
-const int MOISTURE_LOW = 30;
+const int MOISTURE_LOW = 35;
 const int MOISTURE_HIGH = 60;
 
 // RAW thap hon muc nay nghia la cam bien mat nguon / tuot day (nhu luc truoc doc 9-103)
@@ -28,7 +28,7 @@ const int SENSOR_FAULT_RAW = 600;
 
 // Moi lan chi bom ngan roi cho nuoc tham, tranh bom tran chau khi cam bien phan ung cham
 const unsigned long PUMP_ON_MS = 3000;  // Thoi gian bom moi lan (3 giay)
-const unsigned long SOAK_MS = 30000;    // Thoi gian cho nuoc tham giua 2 lan bom (30 giay)
+const unsigned long SOAK_MS = 5000;     // Thoi gian cho nuoc tham giua 2 lan bom (5 giay de test, chau that nen 30-60 giay)
 
 bool watering = false;              // Dang trong chu ky tuoi (do am chua len toi MOISTURE_HIGH)
 bool pumpOn = false;                // May bom dang chay
