@@ -52,6 +52,12 @@ void setPump(bool on) {
   } else if (!on && pumpOn) {
     pumpStopTime = millis();
   }
+  if (on != pumpOn) {
+    // Relay dong/ngat gay nhieu dien, LCD de bi lech du lieu va hien ky tu rac.
+    // Cho nhieu qua roi khoi tao lai LCD; loop() se ve lai toan bo noi dung ngay sau do.
+    delay(50);
+    lcd.begin(16, 2);
+  }
   pumpOn = on;
 }
 
