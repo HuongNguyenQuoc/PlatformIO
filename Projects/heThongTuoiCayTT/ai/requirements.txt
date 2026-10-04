@@ -1,0 +1,9 @@
+torch
+torchvision
+pillow
+numpy
+scikit-learn
+tqdm
+pyserial
+requests
+opencv-python
