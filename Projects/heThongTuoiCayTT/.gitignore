@@ -3,3 +3,15 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# ===== AI (Python) =====
+ai/.venv/
+ai/data/
+ai/captures/
+ai/models/
+ai/logs/
+__pycache__/
+*.pyc
+
+# ===== ESP32-CAM =====
+esp32cam/include/secrets.h
