@@ -8,7 +8,7 @@ AI_DIR = Path(__file__).resolve().parent
 DATA_DIR = AI_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
 PV_DIR = RAW_DIR / "plantvillage" / "raw" / "color" # Anh PlantVillage goc
-PV_DIR = RAW_DIR / "plantdoc"
+PD_DIR = RAW_DIR / "plantdoc"
 
 MODELS_DIR = AI_DIR / "models"
 CAPTURES_DIR = AI_DIR / "captures"
