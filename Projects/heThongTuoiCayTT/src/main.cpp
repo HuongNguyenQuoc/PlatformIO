@@ -35,6 +35,14 @@ bool pumpOn = false;                // May bom dang chay
 unsigned long pumpStartTime = 0;    // Thoi diem bat bom gan nhat
 unsigned long pumpStopTime = 0;     // Thoi diem tat bom gan nhat
 
+// Ket qua AI tu laptop (ai/service.py gui qua cap USB), moi dong dang "AI:<toi da 13 ky tu>\n"
+// vd "AI:Benh 97% TLB". Gui "AI:" (rong) de xoa ket qua.
+const unsigned long AI_TOGGLE_MS = 3000; // Dong 2 LCD luan phien bom <-> AI moi 3 giay
+char aiText[14] = "";                    // Noi dung AI dang hien (13 ky tu + '\0')
+bool hasAiResult = false;
+char serialLine[24];                     // Dong lenh dang nhan do qua Serial
+byte serialLen = 0;
+
 // Doc A0 nhieu lan roi lay trung binh de so do on dinh hon
 int readSoilAverage() {
   long sum = 0; // Dung long vi 10 x 1023 vuot qua gioi han an toan cua int
@@ -61,6 +69,34 @@ void setPump(bool on) {
   pumpOn = on;
 }
 
+void handleSerialLine(const char *line) {
+  if (strncmp(line, "AI:", 3) != 0) {
+    return; // Khong phai lenh AI thi bo qua
+  }
+  strncpy(aiText, line + 3, sizeof(aiText) - 1);
+  aiText[sizeof(aiText) - 1] = '\0';
+  hasAiResult = aiText[0] != '\0';
+  Serial.print("AI OK: "); // Bao lai cho laptop biet da nhan
+  Serial.println(aiText);
+}
+
+// Lay het ky tu dang cho trong bo dem Serial, gap '\n' thi xu ly ca dong. Khong chan loop().
+void readSerialCommands() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\r') {
+      continue;
+    }
+    if (c == '\n') {
+      serialLine[serialLen] = '\0';
+      handleSerialLine(serialLine);
+      serialLen = 0;
+    } else if (serialLen < sizeof(serialLine) - 1) {
+      serialLine[serialLen++] = c;
+    }
+  }
+}
+
 void setup() {
   Serial.begin(9600);
 
@@ -81,6 +117,9 @@ void setup() {
 }
 
 void loop() {
+  // 0. Nhan ket qua AI tu laptop (neu co)
+  readSerialCommands();
+
   // 1. Doc gia tri Analog (0 - 1023), lay trung binh SAMPLE_COUNT lan
   int rawValue = readSoilAverage();
   bool sensorFault = rawValue < SENSOR_FAULT_RAW;
@@ -122,12 +161,21 @@ void loop() {
     lcd.print("%       ");
   }
 
-  // Dong 2: Trang thai bom + gia tri Raw de quan sat hieu chuan
+  // Dong 2: Trang thai bom + gia tri Raw de quan sat hieu chuan,
+  // luan phien voi ket qua AI moi AI_TOGGLE_MS neu laptop da gui ket qua
   lcd.setCursor(0, 1);
-  lcd.print(pumpOn ? "Bom:ON  " : "Bom:OFF ");
-  lcd.print("R:");
-  lcd.print(rawValue);
-  lcd.print("    ");
+  if (hasAiResult && (millis() / AI_TOGGLE_MS) % 2 == 1) {
+    lcd.print("AI:");
+    lcd.print(aiText);
+    for (int i = 3 + strlen(aiText); i < 16; i++) {
+      lcd.print(' '); // Xoa phan chu cu con sot lai
+    }
+  } else {
+    lcd.print(pumpOn ? "Bom:ON  " : "Bom:OFF ");
+    lcd.print("R:");
+    lcd.print(rawValue);
+    lcd.print("    ");
+  }
 
   // 5. In ra Serial Monitor
   Serial.print("Raw: ");
