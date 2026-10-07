@@ -1,10 +1,15 @@
 #include <Arduino.h>
 #include <LiquidCrystal.h>
+#include <SoftwareSerial.h>
 
 // Khoi tao LCD 1602 theo cac chan:
 // LiquidCrystal(RS, Enable, D4, D5, D6, D7)
 // Khoi tao LCD 1602 theo cac chan da hoat dong tot
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+// Cong Serial thu 2 noi sang ESP32-CAM qua module BSS138:
+// D8 nhan (tu ESP IO13, kenh HV2-LV2), D9 gui (sang ESP IO14, kenh HV1-LV1)
+SoftwareSerial espSerial(8, 9);
 
 const int SOIL_PIN = A0; // Chan doc Analog cua cam bien do am dat
 const int RELAY_PIN = 7; // Chan dieu khien relay may bom (IN cua module relay)
@@ -35,13 +40,26 @@ bool pumpOn = false;                // May bom dang chay
 unsigned long pumpStartTime = 0;    // Thoi diem bat bom gan nhat
 unsigned long pumpStopTime = 0;     // Thoi diem tat bom gan nhat
 
-// Ket qua AI tu laptop (ai/service.py gui qua cap USB), moi dong dang "AI:<toi da 13 ky tu>\n"
-// vd "AI:Benh 97% TLB". Gui "AI:" (rong) de xoa ket qua.
-const unsigned long AI_TOGGLE_MS = 3000; // Dong 2 LCD luan phien bom <-> AI moi 3 giay
-char aiText[14] = "";                    // Noi dung AI dang hien (13 ky tu + '\0')
+// Ket qua AI, moi dong dang "AI:<toi da 16 ky tu>\n", vd "AI:BENH 99%". Gui "AI:" (rong) de xoa ket qua.
+// Den tu ESP32-CAM (app gui len ESP, ESP chuyen xuong qua D8) hoac tu laptop (ai/service.py, cap USB).
+// Ca 2 nguon deu gui lai ket qua moi 60 giay, nen qua AI_TIMEOUT_MS ma khong nghe gi la da mat ket noi.
+const unsigned long AI_TOGGLE_MS = 3000;    // Dong 2 LCD luan phien bom <-> ket qua AI moi 3 giay
+const unsigned long AI_TIMEOUT_MS = 180000; // 3 phut
+char aiText[17] = "";                       // Noi dung AI dang hien (16 ky tu + '\0')
 bool hasAiResult = false;
-char serialLine[24];                     // Dong lenh dang nhan do qua Serial
-byte serialLen = 0;
+unsigned long lastAiTime = 0;               // Thoi diem nhan dong "AI:" gan nhat
+
+// Gui do am cho ESP32-CAM de app xem duoc (ESP dua len trang /status)
+const unsigned long SOIL_REPORT_MS = 5000;
+unsigned long lastSoilReport = 0;
+
+// Bo dem cho 1 dong lenh dang nhan do. Moi cong Serial 1 bo dem rieng de 2 nguon khong tron lan nhau.
+struct LineBuffer {
+  char data[24];
+  byte len;
+};
+LineBuffer usbLine = {"", 0};
+LineBuffer espLine = {"", 0};
 
 // Doc A0 nhieu lan roi lay trung binh de so do on dinh hon
 int readSoilAverage() {
@@ -69,36 +87,51 @@ void setPump(bool on) {
   pumpOn = on;
 }
 
-void handleSerialLine(const char *line) {
+// reply: cong Serial da gui dong nay, de bao lai dung nguon "AI OK: ..."
+void handleSerialLine(const char *line, Stream &reply) {
   if (strncmp(line, "AI:", 3) != 0) {
     return; // Khong phai lenh AI thi bo qua
   }
   strncpy(aiText, line + 3, sizeof(aiText) - 1);
   aiText[sizeof(aiText) - 1] = '\0';
   hasAiResult = aiText[0] != '\0';
-  Serial.print("AI OK: "); // Bao lai cho laptop biet da nhan
-  Serial.println(aiText);
+  lastAiTime = millis();
+  reply.print("AI OK: ");
+  reply.println(aiText);
 }
 
-// Lay het ky tu dang cho trong bo dem Serial, gap '\n' thi xu ly ca dong. Khong chan loop().
-void readSerialCommands() {
-  while (Serial.available() > 0) {
-    char c = Serial.read();
+// Lay het ky tu dang cho trong bo dem cua 1 cong Serial, gap '\n' thi xu ly ca dong. Khong chan loop().
+void readLines(Stream &port, LineBuffer &line) {
+  while (port.available() > 0) {
+    char c = port.read();
     if (c == '\r') {
       continue;
     }
     if (c == '\n') {
-      serialLine[serialLen] = '\0';
-      handleSerialLine(serialLine);
-      serialLen = 0;
-    } else if (serialLen < sizeof(serialLine) - 1) {
-      serialLine[serialLen++] = c;
+      line.data[line.len] = '\0';
+      handleSerialLine(line.data, port);
+      line.len = 0;
+    } else if (line.len < sizeof(line.data) - 1) {
+      line.data[line.len++] = c;
     }
   }
 }
 
+// Gui 1 dong "SOIL:<do am %>,<raw>,<bom 0/1>,<loi cam bien 0/1>" cho ESP32-CAM, vd "SOIL:45,812,0,0"
+void reportSoil(int moisturePercent, int rawValue, bool sensorFault) {
+  espSerial.print("SOIL:");
+  espSerial.print(moisturePercent);
+  espSerial.print(',');
+  espSerial.print(rawValue);
+  espSerial.print(',');
+  espSerial.print(pumpOn ? 1 : 0);
+  espSerial.print(',');
+  espSerial.println(sensorFault ? 1 : 0);
+}
+
 void setup() {
   Serial.begin(9600);
+  espSerial.begin(9600);
 
   // Tat bom truoc roi moi dat OUTPUT, de relay khong bi dong thoang qua luc khoi dong
   digitalWrite(RELAY_PIN, !RELAY_ACTIVE);
@@ -117,8 +150,9 @@ void setup() {
 }
 
 void loop() {
-  // 0. Nhan ket qua AI tu laptop (neu co)
-  readSerialCommands();
+  // 0. Nhan ket qua AI tu laptop (cap USB) va tu ESP32-CAM (D8), neu co
+  readLines(Serial, usbLine);
+  readLines(espSerial, espLine);
 
   // 1. Doc gia tri Analog (0 - 1023), lay trung binh SAMPLE_COUNT lan
   int rawValue = readSoilAverage();
@@ -162,12 +196,12 @@ void loop() {
   }
 
   // Dong 2: Trang thai bom + gia tri Raw de quan sat hieu chuan,
-  // luan phien voi ket qua AI moi AI_TOGGLE_MS neu laptop da gui ket qua
+  // luan phien voi ket qua AI moi AI_TOGGLE_MS neu da nhan duoc ket qua
   lcd.setCursor(0, 1);
   if (hasAiResult && (millis() / AI_TOGGLE_MS) % 2 == 1) {
-    lcd.print("AI:");
-    lcd.print(aiText);
-    for (int i = 3 + strlen(aiText); i < 16; i++) {
+    const char *text = now - lastAiTime > AI_TIMEOUT_MS ? "MAT KET NOI ESP" : aiText;
+    lcd.print(text);
+    for (int i = strlen(text); i < 16; i++) {
       lcd.print(' '); // Xoa phan chu cu con sot lai
     }
   } else {
@@ -188,6 +222,12 @@ void loop() {
     Serial.print("  [LOI CAM BIEN]");
   }
   Serial.println();
+
+  // 6. Gui do am cho ESP32-CAM moi SOIL_REPORT_MS
+  if (now - lastSoilReport >= SOIL_REPORT_MS) {
+    lastSoilReport = now;
+    reportSoil(moisturePercent, rawValue, sensorFault);
+  }
 
   delay(500); // Cap nhat moi 0.5 giay
 }
