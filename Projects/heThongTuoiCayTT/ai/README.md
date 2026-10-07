@@ -7,7 +7,7 @@ ESP32-CAM (ngoài vườn) ──WiFi: GET /capture──▶ Laptop: ai/service.
                                                  ├─ predict.py: chia ô, CNN chấm từng vùng lá
                                                  ├─ captures/<ngày>/  ảnh gốc + ảnh có khung
                                                  ├─ logs/ai_results.csv, logs/moisture.csv
-                                                 └─ USB Serial "AI:Benh 97% TLB\n" ──▶ Nano ──▶ LCD dòng 2
+                                                 └─ USB Serial "AI:BENH 97%\n" ──▶ Nano ──▶ LCD dòng 2
 ```
 
 ## Các file
@@ -49,7 +49,7 @@ Kết quả lần train ngày 07/10/2026:
 
 - Ngoài vườn, model **phân biệt khỏe hay bệnh khá tốt**, nhưng **hay nhầm giữa các bệnh trông giống nhau**.
   - Ví dụ: đốm vi khuẩn cà chua bị nhầm thành Septoria, bệnh sớm khoai tây bị nhầm thành bệnh muộn.
-  - Vì vậy, hãy coi mã bệnh trên LCD là **gợi ý**. Xem chi tiết trong `logs/evaluate.log`.
+  - Vì vậy, LCD chỉ báo mức Khỏe / Nghi / Bệnh. Tên bệnh (in ra màn hình và trên app) chỉ là **gợi ý**. Xem chi tiết trong `logs/evaluate.log`.
 - **Vì sao ngưỡng "Benh" đặt cao (90%):**
   - Ở ngưỡng 60%, model phát hiện được 84/86 ảnh bệnh, nhưng báo nhầm 5/16 ảnh cà chua khỏe ngoài thực tế. Những ảnh khỏe bị nhầm này có xác suất bệnh 64–87%.
   - Với ngưỡng 90%, các ảnh đó rơi vào mức "Nghi" thay vì "Benh".
@@ -70,12 +70,13 @@ python predict.py --webcam                                       # chụp bằng
 
 | LCD hiện | Nghĩa |
 |---|---|
-| `AI:Khoe 85%` | Xác suất bệnh dưới 60%. Số hiện là mức tin cây khỏe |
-| `AI:Nghi 75% TLB` | 60–90%: nghi ngờ, nên ra xem cây |
-| `AI:Benh 97% TLB` | Từ 90% trở lên: có dấu hiệu bệnh. `TLB` là mã bệnh (bảng dưới) |
-| `AI:Khong thay la` | Ảnh có quá ít màu lá, có thể camera bị lệch hướng |
-| `AI:Anh qua toi` | Chụp lúc trời tối |
-| `AI:Loi camera` | Laptop không lấy được ảnh từ ESP32-CAM |
+| `KHOE 85%` | Xác suất bệnh dưới 60%. Số hiện là mức tin cây khỏe |
+| `NGHI 75%` | 60–90%: nghi ngờ, nên ra xem cây |
+| `BENH 97%` | Từ 90% trở lên: có dấu hiệu bệnh. Tên bệnh xem trên màn hình laptop hoặc app; mã bệnh (bảng dưới) vẽ trên ảnh `_ai.jpg` |
+| `KHONG THAY LA` | Ảnh có quá ít màu lá, có thể camera bị lệch hướng |
+| `ANH QUA TOI` | Chụp lúc trời tối |
+| `LOI CAMERA` | Laptop không lấy được ảnh từ ESP32-CAM |
+| `MAT KET NOI ESP` | Hơn 3 phút Nano không nhận được kết quả (ESP32-CAM hoặc laptop gửi lại mỗi 60 giây) |
 
 | Mã | Bệnh | Mã | Bệnh |
 |---|---|---|---|
@@ -97,8 +98,9 @@ pio run -t upload
 ```
 
 Nano vẫn tưới như cũ. Có thêm 2 điểm mới:
-- Nano nhận các dòng `AI:<tối đa 13 ký tự>` qua Serial và trả lời `AI OK: ...`.
-- Khi đã có kết quả AI, dòng 2 của LCD luân phiên mỗi 3 giây giữa `Bom:OFF R:812` và `AI:Benh 97% TLB`.
+- Nano nhận các dòng `AI:<tối đa 16 ký tự>` từ 2 nguồn: cáp USB (laptop) và chân D8 (ESP32-CAM), rồi trả lời `AI OK: ...` về đúng nguồn đó.
+- Khi đã có kết quả AI, dòng 2 của LCD luân phiên mỗi 3 giây giữa `Bom:OFF R:812` và `BENH 97%` (không có chữ `AI:`).
+- Mỗi 5 giây Nano gửi `SOIL:<độ ẩm %>,<raw>,<bơm 0/1>,<lỗi cảm biến 0/1>` sang ESP32-CAM qua chân D9, để app xem độ ẩm qua `/status`.
 
 **Test không cần Python:** mở Serial Monitor (9600 baud, chọn kết thúc dòng là *Newline*), gõ `AI:Test 123` rồi Enter. Dòng 2 của LCD sẽ bắt đầu luân phiên. Gõ `AI:` (để trống) để xóa kết quả.
 
@@ -123,8 +125,11 @@ Các đường dẫn ESP32-CAM cung cấp:
 |---|---|
 | `/capture` | Ảnh JPEG 1600×1200 |
 | `/capture?flash=1` | Ảnh JPEG, có bật đèn flash lúc chụp |
-| `/status` | JSON gồm uptime, IP, RSSI, heap |
+| `/status` | JSON gồm uptime, IP, RSSI, heap, `last_result` (kết quả AI gần nhất) và `soil` (độ ẩm Nano gửi lên, `null` nếu chưa nhận được) |
+| `POST /result` | App gửi kết quả AI dạng text (tối đa 16 ký tự, vd `BENH 99%`). ESP lưu vào bộ nhớ, gửi `AI:<text>` xuống Nano và gửi lại mỗi 60 giây |
 | `/` | Trang xem thử |
+
+ESP32-CAM nói chuyện với Nano qua UART 9600 baud, đi qua module chuyển mức BSS138: IO13 (TX) → Nano D8, Nano D9 → IO14 (RX), GND chung. Thử không cần app: `curl -X POST -H "Content-Type: text/plain" --data-binary "BENH 99%" http://<IP>/result` (phải có `Content-Type: text/plain`, nếu không ESP sẽ không nhận được nội dung).
 
 ## 5. Chạy dịch vụ hằng ngày
 
@@ -162,8 +167,8 @@ python service.py --port /dev/ttyACM0          # Nano chính hãng thường là
 | Hiện tượng | Cách xử lý |
 |---|---|
 | `Chua mo duoc cong /dev/ttyUSB0` | Kiểm tra cáp USB và tên cổng (`ls /dev/ttyUSB* /dev/ttyACM*`). Tắt Serial Monitor đang mở |
-| LCD không hiện `AI:` | Xem service có in `[Arduino] AI OK: ...` không. Nếu không, Nano đang chạy firmware cũ: nạp lại bằng `pio run -t upload` |
-| `Loi camera` | Mở `http://esp32cam.local/capture` trên trình duyệt. Nếu không được, dùng IP với `--camera-url` |
+| LCD không hiện kết quả AI | Xem service có in `[Arduino] AI OK: ...` không. Nếu không, Nano đang chạy firmware cũ: nạp lại bằng `pio run -t upload` |
+| `LOI CAMERA` | Mở `http://esp32cam.local/capture` trên trình duyệt. Nếu không được, dùng IP với `--camera-url` |
 | ESP32-CAM khởi động lại liên tục | Thường do nguồn yếu (brownout). Dùng adapter 5V ≥ 2A và dây ngắn |
 | Ảnh bị lật ngược | Xoay camera, hoặc thêm `s->set_vflip(s, 1)` vào `initCamera()` |
 | Báo bệnh nhầm nhiều | Đặt camera gần lá hơn, tăng `DISEASE_THRESHOLD`, và xem ảnh `*_ai.jpg` để biết ô nào bị chấm nhầm |
