@@ -51,11 +51,12 @@ String lastResult;               // Ket qua AI gan nhat app gui len, vd "BENH 99
 unsigned long lastResultSent = 0;
 String nanoLine;                 // Dong dang nhan do tu Nano
 
-// Do am Nano gui len moi 5 giay (dong "SOIL:<do am %>,<raw>,<bom 0/1>,<loi cam bien 0/1>")
+// Do am Nano gui len moi 5 giay (dong "SOIL:<do am %>,<raw>,<bom 0/1>,<loi cam bien 0/1>,<quat 0/1>")
 int soilMoisture = 0;
 int soilRaw = 0;
 bool soilPump = false;
 bool soilFault = false;
+bool soilFan = false;
 unsigned long soilTime = 0;      // 0 = chua nhan duoc lan nao
 
 bool initCamera() {
@@ -158,12 +159,14 @@ void handleResult() {
 
 void handleNanoLine(const String &line) {
   if (line.startsWith("SOIL:")) {
-    int moisture, raw, pump, fault;
-    if (sscanf(line.c_str() + 5, "%d,%d,%d,%d", &moisture, &raw, &pump, &fault) == 4) {
+    int moisture, raw, pump, fault, fan = 0;
+    // Nano chay code cu (chua co quat) chi gui 4 truong: van nhan, coi nhu quat tat
+    if (sscanf(line.c_str() + 5, "%d,%d,%d,%d,%d", &moisture, &raw, &pump, &fault, &fan) >= 4) {
       soilMoisture = moisture;
       soilRaw = raw;
       soilPump = pump == 1;
       soilFault = fault == 1;
+      soilFan = fan == 1;
       soilTime = millis();
     }
   } else if (line.length() > 0) {
@@ -190,9 +193,10 @@ void readNano() {
 void handleStatus() {
   char soil[120] = "null";
   if (soilTime > 0) {
-    snprintf(soil, sizeof(soil), "{\"moisture\":%d,\"raw\":%d,\"pump\":%s,\"fault\":%s,\"age_s\":%lu}",
+    snprintf(soil, sizeof(soil),
+             "{\"moisture\":%d,\"raw\":%d,\"pump\":%s,\"fault\":%s,\"fan\":%s,\"age_s\":%lu}",
              soilMoisture, soilRaw, soilPump ? "true" : "false", soilFault ? "true" : "false",
-             (millis() - soilTime) / 1000);
+             soilFan ? "true" : "false", (millis() - soilTime) / 1000);
   }
   char json[400];
   snprintf(json, sizeof(json),
