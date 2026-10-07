@@ -18,6 +18,17 @@ const int RELAY_PIN = 7; // Chan dieu khien relay may bom (IN cua module relay)
 // Neu relay cua ban kich muc HIGH thi doi thanh HIGH.
 const int RELAY_ACTIVE = LOW;
 
+const int FAN_PIN = 6;             // Chan dieu khien relay quat (IN2 neu dung module relay 2 kenh)
+const int FAN_RELAY_ACTIVE = LOW;  // Kich muc LOW giong relay bom
+
+// Quat thong gio theo ket qua AI: la kho nhanh hon, giam cac benh nam ua am (moc suong, dom la...).
+// BENH: bat 10 phut / tat 20 phut. NGHI: bat 5 phut / tat 25 phut. Con lai: tat.
+// Muon test nhanh thi tam doi thanh vai giay, vd 10000UL va 20000UL.
+const unsigned long FAN_DISEASE_ON_MS = 10UL * 60000;
+const unsigned long FAN_DISEASE_OFF_MS = 20UL * 60000;
+const unsigned long FAN_SUSPECT_ON_MS = 5UL * 60000;
+const unsigned long FAN_SUSPECT_OFF_MS = 25UL * 60000;
+
 // Gia tri hieu chuan mac dinh (ban se cap nhat sau khi test thuc te)
 int airValue = 970;   // Gia tri RAW khi cam bien o ngoai khong khi kho (0%)
 int waterValue = 746; // Gia tri RAW khi nhung cam bien vao nuoc (100%)
@@ -39,6 +50,10 @@ bool watering = false;              // Dang trong chu ky tuoi (do am chua len to
 bool pumpOn = false;                // May bom dang chay
 unsigned long pumpStartTime = 0;    // Thoi diem bat bom gan nhat
 unsigned long pumpStopTime = 0;     // Thoi diem tat bom gan nhat
+
+bool fanOn = false;                 // Quat dang chay
+byte fanLevel = 0;                  // Muc thong gio theo ket qua AI gan nhat: 0 = tat, 1 = nghi benh, 2 = benh
+unsigned long fanCycleStart = 0;    // Thoi diem bat dau chu ky thong gio hien tai
 
 // Ket qua AI, moi dong dang "AI:<toi da 16 ky tu>\n", vd "AI:BENH 99%". Gui "AI:" (rong) de xoa ket qua.
 // Den tu ESP32-CAM (app gui len ESP, ESP chuyen xuong qua D8) hoac tu laptop (ai/service.py, cap USB).
@@ -71,6 +86,13 @@ int readSoilAverage() {
   return sum / SAMPLE_COUNT;
 }
 
+// Relay dong/ngat gay nhieu dien, LCD de bi lech du lieu va hien ky tu rac.
+// Cho nhieu qua roi khoi tao lai LCD; loop() se ve lai toan bo noi dung ngay sau do.
+void resetLcdAfterRelay() {
+  delay(50);
+  lcd.begin(16, 2);
+}
+
 void setPump(bool on) {
   digitalWrite(RELAY_PIN, on ? RELAY_ACTIVE : !RELAY_ACTIVE);
   if (on && !pumpOn) {
@@ -79,12 +101,27 @@ void setPump(bool on) {
     pumpStopTime = millis();
   }
   if (on != pumpOn) {
-    // Relay dong/ngat gay nhieu dien, LCD de bi lech du lieu va hien ky tu rac.
-    // Cho nhieu qua roi khoi tao lai LCD; loop() se ve lai toan bo noi dung ngay sau do.
-    delay(50);
-    lcd.begin(16, 2);
+    resetLcdAfterRelay();
   }
   pumpOn = on;
+}
+
+void setFan(bool on) {
+  digitalWrite(FAN_PIN, on ? FAN_RELAY_ACTIVE : !FAN_RELAY_ACTIVE);
+  if (on != fanOn) {
+    resetLcdAfterRelay();
+  }
+  fanOn = on;
+}
+
+// Quat bat hay tat luc nay: dang o phan "bat" hay phan "tat" cua chu ky thong gio
+bool fanShouldRun(unsigned long now) {
+  if (fanLevel == 0) {
+    return false;
+  }
+  unsigned long onMs = fanLevel == 2 ? FAN_DISEASE_ON_MS : FAN_SUSPECT_ON_MS;
+  unsigned long offMs = fanLevel == 2 ? FAN_DISEASE_OFF_MS : FAN_SUSPECT_OFF_MS;
+  return (now - fanCycleStart) % (onMs + offMs) < onMs;
 }
 
 // reply: cong Serial da gui dong nay, de bao lai dung nguon "AI OK: ..."
@@ -96,6 +133,15 @@ void handleSerialLine(const char *line, Stream &reply) {
   aiText[sizeof(aiText) - 1] = '\0';
   hasAiResult = aiText[0] != '\0';
   lastAiTime = millis();
+
+  // Muc thong gio theo ket qua moi. Chi bat dau lai chu ky khi muc thay doi:
+  // ESP gui lai cung 1 ket qua moi 60 giay, neu lan nao cung bat dau lai thi quat se khong bao gio tat.
+  byte level = strncmp(aiText, "BENH", 4) == 0 ? 2 : strncmp(aiText, "NGHI", 4) == 0 ? 1 : 0;
+  if (level != fanLevel) {
+    fanLevel = level;
+    fanCycleStart = lastAiTime;
+  }
+
   reply.print("AI OK: ");
   reply.println(aiText);
 }
@@ -117,7 +163,7 @@ void readLines(Stream &port, LineBuffer &line) {
   }
 }
 
-// Gui 1 dong "SOIL:<do am %>,<raw>,<bom 0/1>,<loi cam bien 0/1>" cho ESP32-CAM, vd "SOIL:45,812,0,0"
+// Gui 1 dong "SOIL:<do am %>,<raw>,<bom 0/1>,<loi cam bien 0/1>,<quat 0/1>" cho ESP32-CAM, vd "SOIL:45,812,0,0,1"
 void reportSoil(int moisturePercent, int rawValue, bool sensorFault) {
   espSerial.print("SOIL:");
   espSerial.print(moisturePercent);
@@ -126,16 +172,20 @@ void reportSoil(int moisturePercent, int rawValue, bool sensorFault) {
   espSerial.print(',');
   espSerial.print(pumpOn ? 1 : 0);
   espSerial.print(',');
-  espSerial.println(sensorFault ? 1 : 0);
+  espSerial.print(sensorFault ? 1 : 0);
+  espSerial.print(',');
+  espSerial.println(fanOn ? 1 : 0);
 }
 
 void setup() {
   Serial.begin(9600);
   espSerial.begin(9600);
 
-  // Tat bom truoc roi moi dat OUTPUT, de relay khong bi dong thoang qua luc khoi dong
+  // Tat bom va quat truoc roi moi dat OUTPUT, de relay khong bi dong thoang qua luc khoi dong
   digitalWrite(RELAY_PIN, !RELAY_ACTIVE);
   pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(FAN_PIN, !FAN_RELAY_ACTIVE);
+  pinMode(FAN_PIN, OUTPUT);
 
   lcd.begin(16, 2);
   lcd.clear();
@@ -184,15 +234,20 @@ void loop() {
     setPump(true);
   }
 
+  // Quat thong gio theo chu ky cua ket qua AI gan nhat (mat ket noi van giu muc cu: benh khong tu het)
+  setFan(fanShouldRun(now));
+
   // 4. Hien thi len LCD1602
-  // Dong 1: % Do am dat (hoac bao loi cam bien)
+  // Dong 1: % Do am dat + trang thai quat o cot 11 (hoac bao loi cam bien)
   lcd.setCursor(0, 0);
   if (sensorFault) {
     lcd.print("Loi cam bien!   ");
   } else {
     lcd.print("Do am: ");
     lcd.print(moisturePercent);
-    lcd.print("%       ");
+    lcd.print("%    ");
+    lcd.setCursor(11, 0);
+    lcd.print(fanOn ? "Q:ON " : "Q:OFF");
   }
 
   // Dong 2: Trang thai bom + gia tri Raw de quan sat hieu chuan,
@@ -218,6 +273,8 @@ void loop() {
   Serial.print(moisturePercent);
   Serial.print("%  Bom: ");
   Serial.print(pumpOn ? "ON" : "OFF");
+  Serial.print("  Quat: ");
+  Serial.print(fanOn ? "ON" : "OFF");
   if (sensorFault) {
     Serial.print("  [LOI CAM BIEN]");
   }
