@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ESPmDNS.h>
+#include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -35,9 +36,27 @@ const int DISCARD_FRAMES = 2;        // Bo vai khung dau: co the la anh cu trong
 const unsigned long WIFI_CHECK_MS = 10000;          // Kiem tra WiFi moi 10 giay
 const unsigned long WIFI_RESTART_MS = 5UL * 60000;  // Mat WiFi qua 5 phut thi khoi dong lai ESP32
 
+// UART sang Arduino Nano qua module BSS138 (3.3V <-> 5V)
+const int NANO_RX_PIN = 14;                      // Nhan tu Nano D9 (kenh LV1-HV1)
+const int NANO_TX_PIN = 13;                      // Gui sang Nano D8 (kenh LV2-HV2)
+const unsigned long RESULT_RESEND_MS = 60000;    // Gui lai ket qua cho Nano moi 60 giay (phong khi Nano reset)
+const unsigned int RESULT_MAX_LEN = 16;          // LCD 16 ky tu
+
 WebServer server(80);
+Preferences prefs;  // Bo nho NVS: giu ket qua AI qua cac lan mat dien
 unsigned long lastWifiOk = 0;
 unsigned long lastWifiCheck = 0;
+
+String lastResult;               // Ket qua AI gan nhat app gui len, vd "BENH 99%"
+unsigned long lastResultSent = 0;
+String nanoLine;                 // Dong dang nhan do tu Nano
+
+// Do am Nano gui len moi 5 giay (dong "SOIL:<do am %>,<raw>,<bom 0/1>,<loi cam bien 0/1>")
+int soilMoisture = 0;
+int soilRaw = 0;
+bool soilPump = false;
+bool soilFault = false;
+unsigned long soilTime = 0;      // 0 = chua nhan duoc lan nao
 
 bool initCamera() {
   camera_config_t config = {};
@@ -112,12 +131,75 @@ void handleCapture() {
   esp_camera_fb_return(fb);
 }
 
+void sendResultToNano() {
+  Serial2.print("AI:");
+  Serial2.println(lastResult);
+  lastResultSent = millis();
+}
+
+// App gui ket qua AI: POST /result, noi dung dang text, vd "BENH 99%".
+// Chi giu ky tu ASCII in duoc (LCD khong co dau tieng Viet), bo dau " va \ de /status van la JSON hop le.
+void handleResult() {
+  String text = server.arg("plain");
+  text.trim();
+  String clean;
+  for (unsigned int i = 0; i < text.length() && clean.length() < RESULT_MAX_LEN; i++) {
+    char c = text[i];
+    if (c >= 32 && c < 127 && c != '"' && c != '\\') {
+      clean += c;
+    }
+  }
+  lastResult = clean;
+  prefs.putString("result", lastResult);
+  sendResultToNano();
+  Serial.printf("Ket qua AI moi: \"%s\" -> da gui xuong Nano\n", lastResult.c_str());
+  server.send(200, "text/plain", "OK");
+}
+
+void handleNanoLine(const String &line) {
+  if (line.startsWith("SOIL:")) {
+    int moisture, raw, pump, fault;
+    if (sscanf(line.c_str() + 5, "%d,%d,%d,%d", &moisture, &raw, &pump, &fault) == 4) {
+      soilMoisture = moisture;
+      soilRaw = raw;
+      soilPump = pump == 1;
+      soilFault = fault == 1;
+      soilTime = millis();
+    }
+  } else if (line.length() > 0) {
+    Serial.printf("[Nano] %s\n", line.c_str());  // Vd "AI OK: BENH 99%" xac nhan Nano da nhan
+  }
+}
+
+// Lay het ky tu Nano gui sang, gap '\n' thi xu ly ca dong. Khong chan loop().
+void readNano() {
+  while (Serial2.available() > 0) {
+    char c = Serial2.read();
+    if (c == '\r') {
+      continue;
+    }
+    if (c == '\n') {
+      handleNanoLine(nanoLine);
+      nanoLine = "";
+    } else if (nanoLine.length() < 40) {
+      nanoLine += c;
+    }
+  }
+}
+
 void handleStatus() {
-  char json[200];
+  char soil[120] = "null";
+  if (soilTime > 0) {
+    snprintf(soil, sizeof(soil), "{\"moisture\":%d,\"raw\":%d,\"pump\":%s,\"fault\":%s,\"age_s\":%lu}",
+             soilMoisture, soilRaw, soilPump ? "true" : "false", soilFault ? "true" : "false",
+             (millis() - soilTime) / 1000);
+  }
+  char json[400];
   snprintf(json, sizeof(json),
-           "{\"uptime_s\":%lu,\"ip\":\"%s\",\"rssi\":%d,\"psram\":%s,\"free_heap\":%u}",
+           "{\"uptime_s\":%lu,\"ip\":\"%s\",\"rssi\":%d,\"psram\":%s,\"free_heap\":%u,"
+           "\"last_result\":\"%s\",\"soil\":%s}",
            millis() / 1000, WiFi.localIP().toString().c_str(), WiFi.RSSI(),
-           psramFound() ? "true" : "false", ESP.getFreeHeap());
+           psramFound() ? "true" : "false", ESP.getFreeHeap(), lastResult.c_str(), soil);
   server.send(200, "application/json", json);
 }
 
@@ -155,6 +237,10 @@ void setup() {
   pinMode(FLASH_LED_PIN, OUTPUT);
   digitalWrite(FLASH_LED_PIN, LOW);
 
+  Serial2.begin(9600, SERIAL_8N1, NANO_RX_PIN, NANO_TX_PIN);
+  prefs.begin("ai", false);
+  lastResult = prefs.getString("result", "");  // Ket qua truoc khi mat dien, loop() se gui lai cho Nano
+
   if (!initCamera()) {
     Serial.println("Kiem tra cap camera, nguon 5V >= 2A. Khoi dong lai sau 5 giay...");
     delay(5000);
@@ -170,13 +256,19 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/capture", handleCapture);
   server.on("/status", handleStatus);
+  server.on("/result", HTTP_POST, handleResult);
   server.begin();
 }
 
 void loop() {
   server.handleClient();
+  readNano();
 
   unsigned long now = millis();
+  if (lastResult.length() > 0 && (lastResultSent == 0 || now - lastResultSent >= RESULT_RESEND_MS)) {
+    sendResultToNano();
+  }
+
   if (now - lastWifiCheck >= WIFI_CHECK_MS) {
     lastWifiCheck = now;
     if (WiFi.status() == WL_CONNECTED) {
