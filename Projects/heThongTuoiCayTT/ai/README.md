@@ -100,7 +100,8 @@ pio run -t upload
 Nano vẫn tưới như cũ. Có thêm 2 điểm mới:
 - Nano nhận các dòng `AI:<tối đa 16 ký tự>` từ 2 nguồn: cáp USB (laptop) và chân D8 (ESP32-CAM), rồi trả lời `AI OK: ...` về đúng nguồn đó.
 - Khi đã có kết quả AI, dòng 2 của LCD luân phiên mỗi 3 giây giữa `Bom:OFF R:812` và `BENH 97%` (không có chữ `AI:`).
-- Mỗi 5 giây Nano gửi `SOIL:<độ ẩm %>,<raw>,<bơm 0/1>,<lỗi cảm biến 0/1>` sang ESP32-CAM qua chân D9, để app xem độ ẩm qua `/status`.
+- Mỗi 5 giây Nano gửi `SOIL:<độ ẩm %>,<raw>,<bơm 0/1>,<lỗi cảm biến 0/1>,<quạt 0/1>` sang ESP32-CAM qua chân D9, để app xem độ ẩm qua `/status`.
+- **Quạt thông gió** (relay ở chân D6) chạy theo kết quả AI gần nhất: `BENH` bật 10 phút / tắt 20 phút, `NGHI` bật 5 phút / tắt 25 phút, còn lại tắt. Chu kỳ chỉ bắt đầu lại khi mức đổi (ESP gửi lại cùng kết quả mỗi 60 giây không làm quạt chạy mãi). LCD dòng 1 hiện `Q:ON` / `Q:OFF`. Đổi thời gian ở các hằng `FAN_*_MS` trong `../src/main.cpp`.
 
 **Test không cần Python:** mở Serial Monitor (9600 baud, chọn kết thúc dòng là *Newline*), gõ `AI:Test 123` rồi Enter. Dòng 2 của LCD sẽ bắt đầu luân phiên. Gõ `AI:` (để trống) để xóa kết quả.
 
@@ -125,7 +126,7 @@ Các đường dẫn ESP32-CAM cung cấp:
 |---|---|
 | `/capture` | Ảnh JPEG 1600×1200 |
 | `/capture?flash=1` | Ảnh JPEG, có bật đèn flash lúc chụp |
-| `/status` | JSON gồm uptime, IP, RSSI, heap, `last_result` (kết quả AI gần nhất) và `soil` (độ ẩm Nano gửi lên, `null` nếu chưa nhận được) |
+| `/status` | JSON gồm uptime, IP, RSSI, heap, `last_result` (kết quả AI gần nhất) và `soil` (độ ẩm, bơm, quạt do Nano gửi lên, `null` nếu chưa nhận được) |
 | `POST /result` | App gửi kết quả AI dạng text (tối đa 16 ký tự, vd `BENH 99%`). ESP lưu vào bộ nhớ, gửi `AI:<text>` xuống Nano và gửi lại mỗi 60 giây |
 | `/` | Trang xem thử |
 
