@@ -120,19 +120,18 @@ def disease_level(prob: float) -> str:
 
 
 def lcd_text(result: dict) -> str:
-    """Chuoi toi da 13 ky tu, Arduino hien sau chu 'AI:' tren dong 2 cua LCD."""
+    """Chuoi toi da 16 ky tu, Arduino hien nguyen dong 2 cua LCD, vd "BENH 99%"."""
     if result["status"] == "too_dark":
-        return "Anh qua toi"
+        return "ANH QUA TOI"
     if result["status"] == "no_leaf":
-        return "Khong thay la"
+        return "KHONG THAY LA"
     prob = result["disease_prob"]
-    code = config.CLASS_INFO.get(result["disease_class"], ("???", ""))[0]
-    # int() lam tron xuong cho khop nguong: 89.7% (muc "Nghi") hien "89%", lam tron len thanh "Nghi 90%" de gay nham
+    # int() lam tron xuong cho khop nguong: 89.7% (muc "Nghi") hien "89%", lam tron len thanh "NGHI 90%" de gay nham
     if result["level"] == "diseased":
-        return f"Benh {int(prob * 100)}% {code}"
+        return f"BENH {int(prob * 100)}%"
     if result["level"] == "suspect":
-        return f"Nghi {int(prob * 100)}% {code}"
-    return f"Khoe {int((1 - prob) * 100)}%"
+        return f"NGHI {int(prob * 100)}%"
+    return f"KHOE {int((1 - prob) * 100)}%"
 
 
 def describe(result: dict) -> str:
@@ -174,7 +173,7 @@ def annotate(image: Image.Image, result: dict) -> Image.Image:
         code = "OK" if region["level"] == "healthy" else config.CLASS_INFO.get(region["disease_class"], ("?",))[0]
         draw.text((x0 + 3 * line_w, y0 + 2 * line_w), f"{region['disease_prob']:.0%} {code}", fill=color,
                   font=font, stroke_width=3, stroke_fill=(0, 0, 0))
-    draw.text((10, image.height - font.size - 14), "AI:" + lcd_text(result), fill=(255, 255, 255), font=font,
+    draw.text((10, image.height - font.size - 14), lcd_text(result), fill=(255, 255, 255), font=font,
               stroke_width=3, stroke_fill=(0, 0, 0))
     return image
 
