@@ -1,15 +1,16 @@
 """Gom anh PlantVillage + PlantDoc thanh 4 tap de train va danh gia model.
 
 Dau ra (moi lop la 1 thu muc con):
-    data/train/<lop>/      80% PlantVillage + toan bo PlantDoc train
+    data/train/<lop>/      80% PlantVillage + toan bo PlantDoc train + 70% anh tu chup
     data/val/<lop>/        10% PlantVillage
     data/test_pv/<lop>/    10% PlantVillage
-    data/test_real/<lop>/  PlantDoc test (anh chup ngoai vuon that)
+    data/test_real/<lop>/  PlantDoc test + 30% anh tu chup (anh chup ngoai vuon that)
+
+Anh tu chup (khong bat buoc) dat tai data/raw/own/<ten lop trong config.CLASSES>/*.jpg
 """
 import random
 import shutil
 from pathlib import Path
-from tkinter import NO
 
 from PIL import Image, ImageOps
 from tqdm import tqdm
@@ -74,6 +75,13 @@ def main():
         if pd_name is not None:
             jobs += [(f, "train", "pd") for f in list_images(config.PD_DIR / "train" / pd_name)]
             jobs += [(f, "test_real", "pd") for f in list_images(config.PD_DIR / "test" / pd_name)]
+
+        # Anh tu chup (neu co data/raw/own/<lop>/): 30% vao test_real, con lai vao train
+        own_files = list_images(config.OWN_DIR / cls)
+        rng.shuffle(own_files)
+        n_own_test = round(len(own_files) * config.OWN_TEST_RATIO)
+        jobs += [(f, "test_real", "own") for f in own_files[:n_own_test]]
+        jobs += [(f, "train", "own") for f in own_files[n_own_test:]]
 
         # 4. Luu tung anh vao dung thu muc, ten file: pv_00012.jpg / pd_00345.jpg
         for i, (src, split, prefix) in enumerate(tqdm(jobs, desc=cls, ncols=90)):
