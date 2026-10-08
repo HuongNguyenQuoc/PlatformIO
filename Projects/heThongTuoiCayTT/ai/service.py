@@ -167,8 +167,8 @@ def run_check(predictor: Predictor, camera_urls: list[str], image_path: Path | N
         image.load()
     except (RuntimeError, OSError, UnidentifiedImageError) as e:
         print(f"\n[{now:%Y-%m-%d %H:%M:%S}] {e}")
-        append_csv(AI_LOG, AI_LOG_HEADER, [stamp, "", "camera_error", "", "", "", "Loi camera"])
-        return "Loi camera"
+        append_csv(AI_LOG, AI_LOG_HEADER, [stamp, "", "camera_error", "", "", "", "LOI CAMERA"])
+        return "LOI CAMERA"
 
     day_dir = config.CAPTURES_DIR / f"{now:%Y-%m-%d}"
     day_dir.mkdir(parents=True, exist_ok=True)
@@ -181,7 +181,7 @@ def run_check(predictor: Predictor, camera_urls: list[str], image_path: Path | N
 
     print(f"\n[{now:%Y-%m-%d %H:%M:%S}] Anh: {raw_path}")
     print(describe(result))
-    print(f"LCD: AI:{text}")
+    print(f"LCD: {text}")
     name = config.CLASS_INFO.get(result["disease_class"], ("", ""))[1] if result["is_diseased"] else ""
     append_csv(AI_LOG, AI_LOG_HEADER, [stamp, raw_path, result["status"], f"{result['disease_prob']:.3f}",
                                        result["disease_class"] if result["is_diseased"] else "", name, text])
