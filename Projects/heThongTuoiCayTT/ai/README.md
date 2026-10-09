@@ -107,14 +107,15 @@ Nano vẫn tưới như cũ. Có thêm 2 điểm mới:
 
 ## 4. ESP32-CAM
 
-1. Mở `../esp32cam/include/secrets.h` và điền tên, mật khẩu WiFi. ESP32 **chỉ bắt được WiFi 2.4 GHz**. File này đã nằm trong `.gitignore`.
-2. Cắm ESP32-CAM lên đế **ESP32-CAM-MB**, cắm USB vào laptop rồi nạp code:
+1. Mở `../esp32cam/include/secrets.h` và điền tên, mật khẩu WiFi. ESP32 **chỉ bắt được WiFi 2.4 GHz**. Copy `../esp32cam/secrets.example.ini` thành `secrets.ini` rồi đặt mật khẩu nạp code qua WiFi. Cả 2 file đã nằm trong `.gitignore`.
+2. Cắm ESP32-CAM lên đế **ESP32-CAM-MB**, cắm USB vào laptop rồi nạp code qua cáp:
    ```bash
    cd ~/Documents/PlatformIO/Projects/heThongTuoiCayTT
-   pio run -d esp32cam -t upload
-   pio device monitor -d esp32cam     # xem log, ghi lại địa chỉ IP
+   pio run -d esp32cam -e esp32cam -t upload
+   pio device monitor -d esp32cam -e esp32cam     # xem log, ghi lại địa chỉ IP
    ```
    Nếu báo lỗi `Failed to connect`, giữ nút IO0 trên đế MB, bấm RST, rồi nạp lại.
+   Từ lần sau có thể nạp qua WiFi bằng `pio run -d esp32cam -t upload` (xem `docs/wiring.md`, mục 6).
 3. Trên trình duyệt, mở `http://esp32cam.local/`. Trang sẽ hiện ảnh chụp thử.
    - Nếu không mở được, dùng địa chỉ IP đã ghi lại ở bước 2, ví dụ `http://192.168.1.50/`.
    - Nên đặt IP cố định cho ESP32-CAM trong trang quản lý router (DHCP reservation).

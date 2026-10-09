@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <WebServer.h>
@@ -10,6 +11,11 @@
 #include "secrets.h"
 #else
 #error "Chua co include/secrets.h: copy include/secrets.example.h thanh include/secrets.h roi dien WiFi"
+#endif
+
+// Mat khau nap code qua WiFi, lay tu esp32cam/secrets.ini qua build_flags trong platformio.ini
+#ifndef OTA_PASSWORD
+#error "Chua co OTA_PASSWORD: copy secrets.example.ini thanh secrets.ini roi dat mat khau"
 #endif
 
 // Chan camera OV2640 tren board AI-Thinker ESP32-CAM
@@ -257,6 +263,16 @@ void setup() {
     MDNS.addService("http", "tcp", 80);
   }
 
+  // Nap code qua WiFi (OTA), laptop chay: pio run -d esp32cam -t upload
+  // mDNS da bat o tren nen tat phan mDNS cua ArduinoOTA
+  ArduinoOTA.setHostname(HOSTNAME);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.setMdnsEnabled(false);
+  ArduinoOTA.onStart([]() { Serial.println("Dang nhan code moi qua WiFi..."); });
+  ArduinoOTA.onEnd([]() { Serial.println("Nap xong, khoi dong lai"); });
+  ArduinoOTA.onError([](ota_error_t err) { Serial.printf("Nap qua WiFi loi %u\n", err); });
+  ArduinoOTA.begin();
+
   server.on("/", handleRoot);
   server.on("/capture", handleCapture);
   server.on("/status", handleStatus);
@@ -265,6 +281,7 @@ void setup() {
 }
 
 void loop() {
+  ArduinoOTA.handle();
   server.handleClient();
   readNano();
 

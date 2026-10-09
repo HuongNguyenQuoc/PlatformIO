@@ -80,7 +80,8 @@ unsigned long fanCycleStart = 0;    // Thoi diem bat dau chu ky thong gio hien t
 // Ket qua AI, moi dong dang "AI:<toi da 16 ky tu>\n", vd "AI:BENH 99%". Gui "AI:" (rong) de xoa ket qua.
 // Den tu ESP32-CAM (app gui len ESP, ESP chuyen xuong qua D8) hoac tu laptop (ai/service.py, cap USB).
 // Ca 2 nguon deu gui lai ket qua moi 60 giay, nen qua AI_TIMEOUT_MS ma khong nghe gi la da mat ket noi.
-const unsigned long AI_TOGGLE_MS = 3000;    // Dong 2 LCD luan phien bom <-> ket qua AI moi 3 giay
+const unsigned long AI_SHOW_MS = 10000;     // Dong 2 LCD hien ket qua AI 10 giay...
+const unsigned long PUMP_SHOW_MS = 3000;    // ...roi hien trang thai bom 3 giay, lap lai
 const unsigned long AI_TIMEOUT_MS = 180000; // 3 phut
 char aiText[17] = "";                       // Noi dung AI dang hien (16 ky tu + '\0')
 bool hasAiResult = false;
@@ -295,9 +296,9 @@ void loop() {
   }
 
   // Dong 2: Trang thai bom + gia tri Raw de quan sat hieu chuan,
-  // luan phien voi ket qua AI moi AI_TOGGLE_MS neu da nhan duoc ket qua
+  // luan phien voi ket qua AI (AI_SHOW_MS / PUMP_SHOW_MS) neu da nhan duoc ket qua
   lcd.setCursor(0, 1);
-  if (hasAiResult && (millis() / AI_TOGGLE_MS) % 2 == 1) {
+  if (hasAiResult && now % (AI_SHOW_MS + PUMP_SHOW_MS) < AI_SHOW_MS) {
     const char *text = now - lastAiTime > AI_TIMEOUT_MS ? "MAT KET NOI ESP" : aiText;
     lcd.print(text);
     for (int i = strlen(text); i < 16; i++) {
