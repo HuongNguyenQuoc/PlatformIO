@@ -107,7 +107,7 @@ Nano vẫn tưới như cũ. Có thêm 2 điểm mới:
 
 ## 4. ESP32-CAM
 
-1. Mở `../esp32cam/include/secrets.h` và điền tên, mật khẩu WiFi. ESP32 **chỉ bắt được WiFi 2.4 GHz**. Copy `../esp32cam/secrets.example.ini` thành `secrets.ini` rồi đặt mật khẩu nạp code qua WiFi. Cả 2 file đã nằm trong `.gitignore`.
+1. Mở `../esp32cam/include/secrets.h` và điền tên, mật khẩu WiFi nhà, cùng `AP_PASSWORD` (8–63 ký tự) cho WiFi riêng `TuoiCay-CAM`. ESP32 **chỉ bắt được WiFi 2.4 GHz**. Copy `../esp32cam/secrets.example.ini` thành `secrets.ini` rồi đặt mật khẩu nạp code qua WiFi. Cả 2 file đã nằm trong `.gitignore`.
 2. Cắm ESP32-CAM lên đế **ESP32-CAM-MB**, cắm USB vào laptop rồi nạp code qua cáp:
    ```bash
    cd ~/Documents/PlatformIO/Projects/heThongTuoiCayTT
@@ -127,9 +127,14 @@ Các đường dẫn ESP32-CAM cung cấp:
 |---|---|
 | `/capture` | Ảnh JPEG 1600×1200 |
 | `/capture?flash=1` | Ảnh JPEG, có bật đèn flash lúc chụp |
-| `/status` | JSON gồm uptime, IP, RSSI, heap, `last_result` (kết quả AI gần nhất) và `soil` (độ ẩm, bơm, quạt do Nano gửi lên, `null` nếu chưa nhận được) |
+| `/status` | JSON gồm uptime, `wifi_ok`/`ip`/`rssi`/`bssid` của WiFi nhà, `ap_ip`/`ap_clients` của WiFi `TuoiCay-CAM`, heap, `last_result` (kết quả AI gần nhất) và `soil` (độ ẩm, bơm, quạt do Nano gửi lên, `null` nếu chưa nhận được) |
 | `POST /result` | App gửi kết quả AI dạng text (tối đa 16 ký tự, vd `BENH 99%`). ESP lưu vào bộ nhớ, gửi `AI:<text>` xuống Nano và gửi lại mỗi 60 giây |
 | `/` | Trang xem thử |
+
+**Hai mạng WiFi cùng lúc.** ESP vừa vào WiFi nhà, vừa tự phát WiFi `TuoiCay-CAM` (mật khẩu `AP_PASSWORD`, IP luôn là `192.168.4.1`), nên vẫn dùng được khi router hỏng hoặc mang đi nơi khác: điện thoại vào `TuoiCay-CAM`, bấm "Vẫn kết nối" khi Android báo không có Internet, app tự gọi `192.168.4.1`. Laptop cũng dùng được: `python service.py --camera-url http://192.168.4.1/capture`.
+
+- Khi có máy đang vào `TuoiCay-CAM`, ESP tạm ngừng dò tìm router để sóng không bị ngắt. Mất WiFi nhà quá 2 phút thì 1 phút mới thử lại 1 lần; quá 30 phút và không ai vào `TuoiCay-CAM` thì ESP khởi động lại.
+- Nếu router và bộ kích sóng phát cùng tên, ESP vào điểm mạnh nhất. Điểm nào vào được mà 10 giây không cấp IP (bộ kích sóng không chuyển dữ liệu của ESP) thì ESP bỏ qua 10 phút và vào điểm khác. Xem `bssid` trong `/status` để biết ESP đang dùng điểm nào.
 
 ESP32-CAM nói chuyện với Nano qua UART 9600 baud, đi qua module chuyển mức BSS138: IO13 (TX) → Nano D8, Nano D9 → IO14 (RX), GND chung. Thử không cần app: `curl -X POST -H "Content-Type: text/plain" --data-binary "BENH 99%" http://<IP>/result` (phải có `Content-Type: text/plain`, nếu không ESP sẽ không nhận được nội dung).
 

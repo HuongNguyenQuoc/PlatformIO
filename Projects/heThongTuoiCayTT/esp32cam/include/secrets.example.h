@@ -5,3 +5,6 @@
 
 #define WIFI_SSID "TEN_WIFI"
 #define WIFI_PASSWORD "MAT_KHAU_WIFI"
+
+// Mat khau WiFi rieng "TuoiCay-CAM" do ESP tu phat (8-63 ky tu). Dien thoai vao mang nay roi goi http://192.168.4.1
+#define AP_PASSWORD "MAT_KHAU_TUOICAY"
