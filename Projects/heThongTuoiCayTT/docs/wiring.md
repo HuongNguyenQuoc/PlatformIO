@@ -103,7 +103,11 @@ Mạch dùng 3 nguồn. GND của USB, adapter, Nano, ESP32-CAM, BSS138 và qu�
 
 Nano: cắm cáp USB, chạy `pio run -t upload` ở thư mục gốc `heThongTuoiCayTT`.
 
-ESP32-CAM: chạy `pio run -d esp32cam -t upload`. Có 2 cách nối:
+ESP32-CAM có 2 cách nạp:
+
+**Qua WiFi (OTA, mặc định):** chạy `pio run -d esp32cam -t upload`, không cần tháo ESP khỏi mạch. Chạy `./esp32cam/watch_upload.sh` thì cứ lưu file code là tự build và nạp. Mật khẩu OTA nằm trong `esp32cam/secrets.ini` (copy từ `secrets.example.ini`). Cách này chỉ dùng được khi ESP đang online và đang chạy firmware có OTA.
+
+**Qua cáp:** chạy `pio run -d esp32cam -e esp32cam -t upload`. Lần đầu bật OTA bắt buộc phải nạp cách này, vì phải ghi lại bảng phân vùng flash. Nếu code mới làm ESP treo trước khi vào được WiFi thì cũng phải nạp lại qua cáp. Có 2 cách nối:
 
 - **Đế ESP32-CAM-MB:** rút ESP ra khỏi dây dupont, cắm lên đế rồi cắm USB. Nếu báo lỗi `Failed to connect`, giữ nút IO0 trên đế, bấm RST, rồi nạp lại.
 - **Mạch USB-TTL (gạt sang 5V):** rút adapter trước, để ESP chỉ lấy nguồn từ USB-TTL. Nối như sau:

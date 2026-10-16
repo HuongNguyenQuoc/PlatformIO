@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <WebServer.h>
@@ -11,6 +12,18 @@
 #else
 #error "Chua co include/secrets.h: copy include/secrets.example.h thanh include/secrets.h roi dien WiFi"
 #endif
+
+// Mat khau nap code qua WiFi, lay tu esp32cam/secrets.ini qua build_flags trong platformio.ini
+#ifndef OTA_PASSWORD
+#error "Chua co OTA_PASSWORD: copy secrets.example.ini thanh secrets.ini roi dat mat khau"
+#endif
+
+// Mat khau WiFi rieng TuoiCay-CAM do ESP tu phat, khai bao trong include/secrets.h
+#ifndef AP_PASSWORD
+#error "Chua co AP_PASSWORD trong include/secrets.h: xem include/secrets.example.h"
+#endif
+static_assert(sizeof(AP_PASSWORD) - 1 >= 8 && sizeof(AP_PASSWORD) - 1 <= 63,
+              "AP_PASSWORD phai dai 8-63 ky tu (WPA2), ngan hon thi ESP khong phat duoc WiFi");
 
 // Chan camera OV2640 tren board AI-Thinker ESP32-CAM
 #define PWDN_GPIO_NUM 32
@@ -32,9 +45,16 @@
 
 const int FLASH_LED_PIN = 4;         // LED flash tren bo (sang manh, chi bat khi chup)
 const char *HOSTNAME = "esp32cam";   // Laptop goi bang ten http://esp32cam.local
+const char *AP_SSID = "TuoiCay-CAM"; // WiFi rieng ESP tu phat: dien thoai vao thang, goi http://192.168.4.1
 const int DISCARD_FRAMES = 2;        // Bo vai khung dau: co the la anh cu trong bo dem hoac chua kip chinh sang
-const unsigned long WIFI_CHECK_MS = 10000;          // Kiem tra WiFi moi 10 giay
-const unsigned long WIFI_RESTART_MS = 5UL * 60000;  // Mat WiFi qua 5 phut thi khoi dong lai ESP32
+const unsigned long WIFI_CHECK_MS = 1000;              // Kiem tra WiFi nha moi giay
+const unsigned long WIFI_RETRY_MS = 10000;             // Mat WiFi nha: 10 giay thu ket noi lai 1 lan
+const unsigned long WIFI_SLOW_AFTER_MS = 2UL * 60000;  // Mat qua 2 phut (router hong, mang di noi khac)...
+const unsigned long WIFI_SLOW_RETRY_MS = 60000;        // ...thi 1 phut moi thu 1 lan, vi moi lan do tim router song TuoiCay-CAM bi khung
+const unsigned long WIFI_RESTART_MS = 30UL * 60000;    // Mat WiFi nha qua 30 phut va khong ai vao TuoiCay-CAM thi khoi dong lai ESP32
+const unsigned long WIFI_DHCP_TIMEOUT_MS = 10000;      // Vao duoc diem phat ma 10 giay chua duoc cap IP...
+const unsigned long WIFI_BAD_AP_MS = 10UL * 60000;     // ...thi bo qua diem phat do 10 phut (vd bo kich song khong chuyen du lieu)
+const int MAX_BAD_APS = 4;
 
 // UART sang Arduino Nano qua module BSS138 (3.3V <-> 5V)
 const int NANO_RX_PIN = 14;                      // Nhan tu Nano D9 (kenh LV1-HV1)
@@ -46,6 +66,19 @@ WebServer server(80);
 Preferences prefs;  // Bo nho NVS: giu ket qua AI qua cac lan mat dien
 unsigned long lastWifiOk = 0;
 unsigned long lastWifiCheck = 0;
+unsigned long lastWifiRetry = 0;
+bool staConnected = false;       // Dang vao duoc WiFi nha chua (de chi in IP 1 lan moi khi vua ket noi)
+volatile uint8_t wifiFailReason = 0;  // Ly do lan gan nhat khong vao duoc WiFi nha (ma loi cua ESP-IDF)
+volatile unsigned long staAssocTime = 0;  // Luc vao duoc diem phat nhung chua co IP (0 = khong o trang thai nay)
+
+// Router va bo kich song co the phat cung ten WiFi. Diem phat nao vao duoc ma khong cap IP thi ghi lai de tranh
+struct BadAp {
+  uint8_t bssid[6];
+  unsigned long since;  // 0 = o trong
+};
+BadAp badAps[MAX_BAD_APS] = {};
+int nextBadAp = 0;
+uint8_t tryingBssid[6] = {};  // Diem phat dang thu vao
 
 String lastResult;               // Ket qua AI gan nhat app gui len, vd "BENH 99%"
 unsigned long lastResultSent = 0;
@@ -198,11 +231,15 @@ void handleStatus() {
              soilMoisture, soilRaw, soilPump ? "true" : "false", soilFault ? "true" : "false",
              soilFan ? "true" : "false", (millis() - soilTime) / 1000);
   }
-  char json[400];
+  // ip/rssi/bssid: WiFi nha ("0.0.0.0" khi chua vao duoc; bssid = router hay bo kich song nao).
+  // ap_ip/ap_clients: WiFi rieng TuoiCay-CAM
+  char json[512];
   snprintf(json, sizeof(json),
-           "{\"uptime_s\":%lu,\"ip\":\"%s\",\"rssi\":%d,\"psram\":%s,\"free_heap\":%u,"
-           "\"last_result\":\"%s\",\"soil\":%s}",
-           millis() / 1000, WiFi.localIP().toString().c_str(), WiFi.RSSI(),
+           "{\"uptime_s\":%lu,\"wifi_ok\":%s,\"ip\":\"%s\",\"rssi\":%d,\"bssid\":\"%s\",\"ap_ip\":\"%s\","
+           "\"ap_clients\":%d,\"psram\":%s,\"free_heap\":%u,\"last_result\":\"%s\",\"soil\":%s}",
+           millis() / 1000, staConnected ? "true" : "false", WiFi.localIP().toString().c_str(),
+           staConnected ? WiFi.RSSI() : 0, staConnected ? WiFi.BSSIDstr().c_str() : "",
+           WiFi.softAPIP().toString().c_str(), WiFi.softAPgetStationNum(),
            psramFound() ? "true" : "false", ESP.getFreeHeap(), lastResult.c_str(), soil);
   server.send(200, "application/json", json);
 }
@@ -215,23 +252,135 @@ void handleRoot() {
               "<a href=/status>/status</a></p><img src=/capture style='max-width:100%'>");
 }
 
-void connectWifi() {
-  WiFi.mode(WIFI_STA);
+const char *wifiFailText(uint8_t reason) {
+  switch (reason) {
+    case WIFI_REASON_NO_AP_FOUND:
+      return "khong thay WiFi: sai ten, WiFi 5 GHz, hoac o xa router";
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+      return "sai mat khau";
+    default:
+      return "loi khac";
+  }
+}
+
+bool isBadAp(const uint8_t *bssid) {
+  for (const BadAp &ap : badAps) {
+    if (ap.since > 0 && millis() - ap.since < WIFI_BAD_AP_MS && memcmp(ap.bssid, bssid, 6) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void markBadAp(const uint8_t *bssid) {
+  memcpy(badAps[nextBadAp].bssid, bssid, 6);
+  badAps[nextBadAp].since = millis();
+  nextBadAp = (nextBadAp + 1) % MAX_BAD_APS;
+}
+
+// Quet cac diem phat ten WIFI_SSID, vao diem manh nhat chua bi danh dau hong (quet mat khoang 2-3 giay)
+void beginWifi() {
+  int n = WiFi.scanNetworks();
+  int best = -1;
+  bool skipped = false;
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) != WIFI_SSID) {
+      continue;
+    }
+    if (isBadAp(WiFi.BSSID(i))) {
+      skipped = true;
+    } else if (best < 0 || WiFi.RSSI(i) > WiFi.RSSI(best)) {
+      best = i;
+    }
+  }
+  if (best >= 0) {
+    memcpy(tryingBssid, WiFi.BSSID(best), 6);
+    Serial.printf("Dang ket noi WiFi \"%s\" qua %s (kenh %d, %d dBm)...\n", WIFI_SSID, WiFi.BSSIDstr(best).c_str(),
+                  WiFi.channel(best), WiFi.RSSI(best));
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WiFi.channel(best), WiFi.BSSID(best));
+  } else if (skipped) {
+    Serial.printf("Chi thay diem phat \"%s\" khong cap IP (bo kich song?). Thu lai sau\n", WIFI_SSID);
+  } else {
+    Serial.printf("Khong thay WiFi \"%s\" (sai ten, WiFi 5 GHz, hoac o xa router?). Thu lai sau\n", WIFI_SSID);
+  }
+  WiFi.scanDelete();
+}
+
+// Chay 2 mang cung luc: vao WiFi nha (router cap IP) va tu phat TuoiCay-CAM (IP co dinh 192.168.4.1).
+// Web server tra loi tren ca 2 dia chi. ESP chi co 1 radio nen TuoiCay-CAM luon phat cung kenh voi router.
+// Khong cho trong setup(): TuoiCay-CAM dung duoc ngay ca khi khong co router, checkWifi() in IP khi vao duoc.
+void startWifi() {
+  WiFi.mode(WIFI_AP_STA);
   WiFi.setHostname(HOSTNAME);
   WiFi.setSleep(false); // Tat tiet kiem dien WiFi de tra anh nhanh, on dinh hon
-  WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.printf("Dang ket noi WiFi \"%s\"", WIFI_SSID);
-  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
-    delay(500);
-    Serial.print('.');
-  }
-  Serial.println();
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("Da ket noi. IP: %s  ->  http://%s.local/capture\n",
-                  WiFi.localIP().toString().c_str(), HOSTNAME);
+  // Tu ket noi lai trong checkWifi(): thu vien tu ket noi lai thi do tim router lien tuc, song TuoiCay-CAM chap chon
+  WiFi.setAutoReconnect(false);
+  WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t) { staAssocTime = millis(); }, ARDUINO_EVENT_WIFI_STA_CONNECTED);
+  WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t) { staAssocTime = 0; }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t info) {
+    staAssocTime = 0;
+    // Bo qua ASSOC_LEAVE: do chinh checkWifi() goi WiFi.disconnect() truoc moi lan thu lai
+    if (info.wifi_sta_disconnected.reason != WIFI_REASON_ASSOC_LEAVE) {
+      wifiFailReason = info.wifi_sta_disconnected.reason;
+    }
+  }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  if (WiFi.softAP(AP_SSID, AP_PASSWORD)) {
+    Serial.printf("Phat WiFi \"%s\"  ->  http://%s/capture\n", AP_SSID, WiFi.softAPIP().toString().c_str());
   } else {
-    Serial.println("Chua ket noi duoc WiFi (sai ten/mat khau, hoac WiFi 5 GHz?). Se tu thu lai.");
+    Serial.println("Khong phat duoc WiFi rieng TuoiCay-CAM");
+  }
+  beginWifi();
+  lastWifiRetry = millis();
+}
+
+// Goi moi giay trong loop(): in IP khi vua vao WiFi nha, mat thi tu thu lai
+void checkWifi(unsigned long now) {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!staConnected) {
+      staConnected = true;
+      Serial.printf("Da ket noi \"%s\". IP: %s  ->  http://%s.local/capture\n", WIFI_SSID,
+                    WiFi.localIP().toString().c_str(), HOSTNAME);
+    }
+    lastWifiOk = now;
+    return;
+  }
+  if (staConnected) {
+    staConnected = false;
+    Serial.println("Mat WiFi nha, TuoiCay-CAM van chay");
+  }
+  // Dang co dien thoai vao TuoiCay-CAM: khong do tim router, de song TuoiCay-CAM khong bi ngat
+  if (WiFi.softAPgetStationNum() > 0) {
+    return;
+  }
+  // Vao duoc diem phat nhung chua co IP: cho, qua WIFI_DHCP_TIMEOUT_MS thi bo diem phat do, thu diem khac ngay
+  unsigned long assoc = staAssocTime;
+  if (assoc > 0) {
+    if (now - assoc >= WIFI_DHCP_TIMEOUT_MS) {
+      Serial.printf("Diem phat %02X:%02X:%02X:%02X:%02X:%02X khong cap IP, bo qua %lu phut\n", tryingBssid[0],
+                    tryingBssid[1], tryingBssid[2], tryingBssid[3], tryingBssid[4], tryingBssid[5],
+                    WIFI_BAD_AP_MS / 60000);
+      markBadAp(tryingBssid);
+      WiFi.disconnect();
+      lastWifiRetry = now;
+      beginWifi();
+    }
+    return;
+  }
+  unsigned long lost = now - lastWifiOk;
+  if (lost >= WIFI_RESTART_MS) {
+    Serial.println("Mat WiFi nha qua lau, khoi dong lai ESP32...");
+    ESP.restart();
+  }
+  if (now - lastWifiRetry >= (lost >= WIFI_SLOW_AFTER_MS ? WIFI_SLOW_RETRY_MS : WIFI_RETRY_MS)) {
+    lastWifiRetry = now;
+    if (wifiFailReason != 0) {
+      Serial.printf("Chua vao duoc WiFi nha (ma %u: %s)\n", wifiFailReason, wifiFailText(wifiFailReason));
+      wifiFailReason = 0;
+    }
+    WiFi.disconnect();
+    beginWifi();
   }
 }
 
@@ -251,11 +400,21 @@ void setup() {
     ESP.restart();
   }
 
-  connectWifi();
+  startWifi();
   lastWifiOk = millis();
   if (MDNS.begin(HOSTNAME)) {
     MDNS.addService("http", "tcp", 80);
   }
+
+  // Nap code qua WiFi (OTA), laptop chay: pio run -d esp32cam -t upload
+  // mDNS da bat o tren nen tat phan mDNS cua ArduinoOTA
+  ArduinoOTA.setHostname(HOSTNAME);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.setMdnsEnabled(false);
+  ArduinoOTA.onStart([]() { Serial.println("Dang nhan code moi qua WiFi..."); });
+  ArduinoOTA.onEnd([]() { Serial.println("Nap xong, khoi dong lai"); });
+  ArduinoOTA.onError([](ota_error_t err) { Serial.printf("Nap qua WiFi loi %u\n", err); });
+  ArduinoOTA.begin();
 
   server.on("/", handleRoot);
   server.on("/capture", handleCapture);
@@ -265,6 +424,7 @@ void setup() {
 }
 
 void loop() {
+  ArduinoOTA.handle();
   server.handleClient();
   readNano();
 
@@ -275,15 +435,7 @@ void loop() {
 
   if (now - lastWifiCheck >= WIFI_CHECK_MS) {
     lastWifiCheck = now;
-    if (WiFi.status() == WL_CONNECTED) {
-      lastWifiOk = now;
-    } else if (now - lastWifiOk >= WIFI_RESTART_MS) {
-      Serial.println("Mat WiFi qua lau, khoi dong lai ESP32...");
-      ESP.restart();
-    } else {
-      Serial.println("Mat WiFi, dang ket noi lai...");
-      WiFi.reconnect();
-    }
+    checkWifi(now);
   }
   delay(2);
 }
