@@ -40,6 +40,8 @@ MOISTURE_LOG_HEADER = ["thoi_gian", "raw", "do_am", "bom", "loi_cam_bien"]
 MOISTURE_RE = re.compile(r"Raw:\s*(\d+)\s*-->\s*Do am:\s*(\d+)%\s*Bom:\s*(ON|OFF)")
 # Mo cong Serial lam Nano reset: cho bootloader + man hinh chao 1.5 s cua setup() xong moi gui
 BOOT_WAIT_SECONDS = 3.5
+# Che do phun suong gui xuong Nano ("MIST:<1-3>"), khop MIST_* trong src/main.cpp. KEEP: giu che do dang chay
+MIST_KEEP, MIST_NORMAL, MIST_STOP, MIST_BOOST = 0, 1, 2, 3
 
 
 def append_csv(path: Path, header: list[str], row: list) -> None:
@@ -84,8 +86,8 @@ class ArduinoLink:
                 pass
         self.ser = None
 
-    def send(self, text: str) -> bool:
-        """Gui 'AI:<text>' xuong Arduino. Tra ve True neu gui duoc."""
+    def send(self, line: str) -> bool:
+        """Gui 1 dong lenh xuong Arduino, vd 'AI:BENH 99%', 'MIST:2', 'TIME:14:05:37'. Tra ve True neu gui duoc."""
         with self.lock:
             if self.ser is None:
                 return False
@@ -93,7 +95,7 @@ class ArduinoLink:
             if wait > 0:
                 time.sleep(wait)
             try:
-                self.ser.write(f"AI:{text}\n".encode("ascii", "replace"))
+                self.ser.write(f"{line}\n".encode("ascii", "replace"))
                 self.ser.flush()
                 return True
             except (serial.SerialException, OSError) as e:
@@ -124,7 +126,7 @@ class ArduinoLink:
     def _handle_line(self, line: str) -> None:
         match = MOISTURE_RE.search(line)
         if not match:
-            print(f"[Arduino] {line}")  # Vd "AI OK: Benh 97% TLB" xac nhan da nhan ket qua
+            print(f"[Arduino] {line}")  # Vd "AI OK" xac nhan da nhan ket qua
             return
         # Dong do am den moi 0.5 s: chi in + ghi CSV moi MOISTURE_LOG_SECONDS giay
         now = time.time()
@@ -157,8 +159,23 @@ def capture_from_camera(urls: list[str]) -> bytes:
     raise RuntimeError("Khong lay duoc anh tu ESP32-CAM:\n  " + "\n  ".join(errors[-len(urls):]))
 
 
-def run_check(predictor: Predictor, camera_urls: list[str], image_path: Path | None = None) -> str:
-    """Lay anh (camera hoac file) -> luu -> AI phan tich -> ghi log. Tra ve chuoi hien LCD."""
+def mist_mode(result: dict) -> int:
+    """Che do phun suong theo tinh trang la, giong LcdMessage.mistMode() cua app Android."""
+    if result["status"] != "ok":
+        return MIST_KEEP  # Anh toi, khong thay la: khong biet la ra sao
+    if result["level"] == "healthy":
+        return MIST_NORMAL
+    if result["level"] == "suspect":
+        return MIST_STOP  # Chua chac benh gi: dung cho an toan
+    if result["disease_class"] == "Tomato_Spider_mites":
+        return MIST_BOOST  # Nhen do so am
+    if result["disease_class"] in ("Tomato_Mosaic", "Tomato_Yellow_Curl"):
+        return MIST_NORMAL  # Virus lay qua con trung / tiep xuc, do am la khong lam benh nang them
+    return MIST_STOP  # Nam, vi khuan: la uot lam benh lan nhanh
+
+
+def run_check(predictor: Predictor, camera_urls: list[str], image_path: Path | None = None) -> tuple[str, int]:
+    """Lay anh (camera hoac file) -> luu -> AI phan tich -> ghi log. Tra ve (chuoi hien LCD, che do phun)."""
     now = datetime.now()
     stamp = now.isoformat(timespec="seconds")
     try:
@@ -168,7 +185,7 @@ def run_check(predictor: Predictor, camera_urls: list[str], image_path: Path | N
     except (RuntimeError, OSError, UnidentifiedImageError) as e:
         print(f"\n[{now:%Y-%m-%d %H:%M:%S}] {e}")
         append_csv(AI_LOG, AI_LOG_HEADER, [stamp, "", "camera_error", "", "", "", "LOI CAMERA"])
-        return "LOI CAMERA"
+        return "LOI CAMERA", MIST_KEEP
 
     day_dir = config.CAPTURES_DIR / f"{now:%Y-%m-%d}"
     day_dir.mkdir(parents=True, exist_ok=True)
@@ -185,7 +202,7 @@ def run_check(predictor: Predictor, camera_urls: list[str], image_path: Path | N
     name = config.CLASS_INFO.get(result["disease_class"], ("", ""))[1] if result["is_diseased"] else ""
     append_csv(AI_LOG, AI_LOG_HEADER, [stamp, raw_path, result["status"], f"{result['disease_prob']:.3f}",
                                        result["disease_class"] if result["is_diseased"] else "", name, text])
-    return text
+    return text, mist_mode(result)
 
 
 def main():
@@ -202,19 +219,31 @@ def main():
     predictor = Predictor()
     link = None if args.no_serial else ArduinoLink(args.port, config.SERIAL_BAUD)
 
-    def publish(text: str) -> None:
-        if link is not None and link.send(text):
-            print(f"Da gui xuong Arduino: AI:{text}")
+    mist = MIST_NORMAL  # Che do phun dang chay: chua co ket qua thi phun binh thuong
+
+    def sync() -> None:
+        """Gui che do phun + gio cua laptop. Gui lai dinh ky de Nano bi reset van lay lai duoc."""
+        if link is not None:
+            link.send(f"MIST:{mist}")
+            link.send(f"TIME:{datetime.now():%H:%M:%S}")
+
+    def publish(text: str, mode: int) -> None:
+        """Gui ket qua moi: Nano hien len LCD 20 giay. Chi gui 1 lan moi lan chup, gui lai la LCD hien lai."""
+        nonlocal mist
+        if mode != MIST_KEEP:
+            mist = mode
+        sync()
+        if link is not None and link.send(f"AI:{text}"):
+            print(f"Da gui xuong Arduino: AI:{text}  (phun che do {mist})")
 
     if args.once:
-        publish(run_check(predictor, camera_urls, args.image))
-        time.sleep(1.5)  # Cho Arduino tra loi "AI OK: ..." truoc khi thoat
+        publish(*run_check(predictor, camera_urls, args.image))
+        time.sleep(1.5)  # Cho Arduino tra loi "AI OK" truoc khi thoat
         return
 
     print(f"Service dang chay. Gio chup moi ngay: {', '.join(config.CAPTURE_TIMES)}. Nhan Ctrl+C de dung.")
-    last_text = run_check(predictor, camera_urls, args.image)
-    publish(last_text)
-    last_sent = time.time()
+    publish(*run_check(predictor, camera_urls, args.image))
+    last_sync = time.time()
     done_slots = set()  # Cac (ngay, gio) da chup, tranh chup 2 lan trong cung 1 phut
     try:
         while True:
@@ -222,12 +251,11 @@ def main():
             slot = now.strftime("%H:%M")
             if slot in config.CAPTURE_TIMES and (now.date(), slot) not in done_slots:
                 done_slots.add((now.date(), slot))
-                last_text = run_check(predictor, camera_urls, args.image)
-                publish(last_text)
-                last_sent = time.time()
-            elif time.time() - last_sent >= config.RESEND_SECONDS:
-                publish(last_text)  # Gui lai dinh ky: Nano co bi reset thi LCD van co ket qua
-                last_sent = time.time()
+                publish(*run_check(predictor, camera_urls, args.image))
+                last_sync = time.time()
+            elif time.time() - last_sync >= config.RESEND_SECONDS:
+                sync()
+                last_sync = time.time()
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nDa dung service.")
