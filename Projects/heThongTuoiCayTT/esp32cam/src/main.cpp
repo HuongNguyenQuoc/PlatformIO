@@ -59,8 +59,18 @@ const int MAX_BAD_APS = 4;
 // UART sang Arduino Nano qua module BSS138 (3.3V <-> 5V)
 const int NANO_RX_PIN = 14;                      // Nhan tu Nano D9 (kenh LV1-HV1)
 const int NANO_TX_PIN = 13;                      // Gui sang Nano D8 (kenh LV2-HV2)
-const unsigned long RESULT_RESEND_MS = 60000;    // Gui lai ket qua cho Nano moi 60 giay (phong khi Nano reset)
-const unsigned int RESULT_MAX_LEN = 16;          // LCD 16 ky tu
+const unsigned int RESULT_MAX_LEN = 40;          // Moi dong ket qua toi da 40 ky tu (khop LcdMessage.MAX_LINE cua app)
+const unsigned long NANO_SYNC_MS = 60000;        // Gui che do phun + gio cho Nano moi 60 giay (Nano reset van lay lai)
+const unsigned long AI_RETRY_MS = 2000;          // Nano chua tra loi "AI OK" sau 2 giay thi gui lai ket qua...
+const int AI_MAX_TRIES = 3;                      // ...toi da 3 lan (SoftwareSerial cua Nano dang gui thi khong nhan duoc)
+
+// Che do phun suong, khop LcdMessage.MIST_* cua app va MIST_* cua Nano. App gui 0 = giu che do cu
+const int MIST_NORMAL = 1;  // 30 giay moi 30 phut, 8h-16h
+const int MIST_STOP = 2;    // La benh nam / vi khuan, hoac nghi benh
+const int MIST_BOOST = 3;   // 30 giay moi 15 phut, 8h-16h (nhen do)
+
+const char *TZ_VN = "ICT-7";              // Mui gio Viet Nam UTC+7
+const time_t MIN_VALID_TIME = 1700000000; // Truoc 11/2023: dong ho chua duoc chinh (ESP mac dinh dem tu nam 1970)
 
 WebServer server(80);
 Preferences prefs;  // Bo nho NVS: giu ket qua AI qua cac lan mat dien
@@ -80,16 +90,23 @@ BadAp badAps[MAX_BAD_APS] = {};
 int nextBadAp = 0;
 uint8_t tryingBssid[6] = {};  // Diem phat dang thu vao
 
-String lastResult;               // Ket qua AI gan nhat app gui len, vd "BENH 99%"
-unsigned long lastResultSent = 0;
+// Ket qua AI gan nhat app gui len, luu trong NVS de giu qua cac lan mat dien
+String leafLine;                 // vd "La ca chua: Moc suong 97%"
+String fruitLine;                // vd "Qua ca chua: Tuoi 92%"
+int mistMode = MIST_NORMAL;
+bool aiPending = false;          // Da gui ket qua moi xuong Nano nhung chua nhan "AI OK"
+int aiTries = 0;
+unsigned long aiLastTry = 0;
+unsigned long lastNanoSync = 0;
+bool timeSentToNano = false;     // Da gui gio cho Nano chua: vua co gio thi gui ngay, khong cho het 60 giay
 String nanoLine;                 // Dong dang nhan do tu Nano
 
-// Do am Nano gui len moi 5 giay (dong "SOIL:<do am %>,<raw>,<bom 0/1>,<loi cam bien 0/1>,<quat 0/1>")
+// Do am Nano gui len moi 5 giay (dong "SOIL:<do am %>,<raw>,<bom 0/1>,<loi cam bien 0/1>,<phun suong 0/1>")
 int soilMoisture = 0;
 int soilRaw = 0;
 bool soilPump = false;
 bool soilFault = false;
-bool soilFan = false;
+bool soilMist = false;
 unsigned long soilTime = 0;      // 0 = chua nhan duoc lan nao
 
 bool initCamera() {
@@ -165,45 +182,105 @@ void handleCapture() {
   esp_camera_fb_return(fb);
 }
 
-void sendResultToNano() {
-  Serial2.print("AI:");
-  Serial2.println(lastResult);
-  lastResultSent = millis();
+// Ket qua moi xuong Nano: "AI:<dong la>|<dong qua>". Nano hien len LCD 20 giay roi tra loi "AI OK".
+// Chi gui khi app gui ket qua moi, khong gui lai dinh ky: moi dong AI: la 1 lan Nano hien 20 giay.
+void sendAiToNano() {
+  Serial2.printf("AI:%s|%s\n", leafLine.c_str(), fruitLine.c_str());
+  aiTries++;
+  aiLastTry = millis();
 }
 
-// App gui ket qua AI: POST /result, noi dung dang text, vd "BENH 99%".
-// Chi giu ky tu ASCII in duoc (LCD khong co dau tieng Viet), bo dau " va \ de /status van la JSON hop le.
-void handleResult() {
-  String text = server.arg("plain");
+// Che do phun + gio (neu da biet gio): "MIST:<1-3>", "TIME:hh:mm:ss". Nano khong tra loi 2 dong nay.
+void syncNano() {
+  Serial2.printf("MIST:%d\n", mistMode);
+  struct tm t;
+  if (time(nullptr) > MIN_VALID_TIME && getLocalTime(&t, 0)) {
+    Serial2.printf("TIME:%02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
+    timeSentToNano = true;
+  }
+  lastNanoSync = millis();
+}
+
+// Chi giu ky tu ASCII in duoc (LCD khong co dau tieng Viet). Bo " va \ de /status van la JSON hop le,
+// bo | vi Nano dung no de tach dong la / dong qua.
+String cleanLine(String text) {
   text.trim();
   String clean;
   for (unsigned int i = 0; i < text.length() && clean.length() < RESULT_MAX_LEN; i++) {
     char c = text[i];
-    if (c >= 32 && c < 127 && c != '"' && c != '\\') {
+    if (c >= 32 && c < 127 && c != '"' && c != '\\' && c != '|') {
       clean += c;
     }
   }
-  lastResult = clean;
-  prefs.putString("result", lastResult);
-  sendResultToNano();
-  Serial.printf("Ket qua AI moi: \"%s\" -> da gui xuong Nano\n", lastResult.c_str());
+  return clean;
+}
+
+// App gui ket qua AI: POST /result, than dang text 4 dong "<dong la>\n<dong qua>\n<che do phun>\n<gio Unix>", vd
+// "La ca chua: Moc suong 97%\nQua ca chua: Tuoi 92%\n2\n1760000000". Gui 1 dong (curl, app cu) van duoc.
+void handleResult() {
+  String body = server.arg("plain");
+  String lines[4];
+  int start = 0;
+  for (int i = 0; i < 4 && start <= (int)body.length(); i++) {
+    int end = body.indexOf('\n', start);
+    if (end < 0) {
+      end = body.length();
+    }
+    lines[i] = body.substring(start, end);
+    start = end + 1;
+  }
+  String leaf = cleanLine(lines[0]);
+  String fruit = cleanLine(lines[1]);
+  if (leaf.length() == 0 && fruit.length() == 0) {
+    server.send(400, "text/plain", "Thieu ket qua: can it nhat 1 dong chu (nho -H \"Content-Type: text/plain\")");
+    return;
+  }
+  leafLine = leaf;
+  fruitLine = fruit;
+  prefs.putString("leaf", leafLine);
+  prefs.putString("fruit", fruitLine);
+
+  // 0 hoac khong co (app khong xem duoc la: anh toi, khong thay la) thi giu che do phun cu
+  int mode = lines[2].toInt();
+  if (mode >= MIST_NORMAL && mode <= MIST_BOOST && mode != mistMode) {
+    mistMode = mode;
+    prefs.putInt("mist", mistMode);
+  }
+  // Chua lay duoc gio qua Internet (vd chi phat WiFi TuoiCay-CAM) thi lay gio dien thoai
+  long long phoneTime = atoll(lines[3].c_str());
+  if (time(nullptr) < MIN_VALID_TIME && phoneTime > MIN_VALID_TIME) {
+    struct timeval tv = {(time_t)phoneTime, 0};
+    settimeofday(&tv, nullptr);
+    Serial.println("Da lay gio tu dien thoai");
+  }
+
+  // Gui che do phun + gio truoc dong AI: Nano tra loi "AI OK" ngay sau dong AI, luc do Nano khong nhan duoc gi
+  syncNano();
+  aiTries = 0;
+  aiPending = true;
+  sendAiToNano();
+  Serial.printf("Ket qua AI moi: \"%s\" | \"%s\", phun che do %d -> da gui xuong Nano\n", leafLine.c_str(),
+                fruitLine.c_str(), mistMode);
   server.send(200, "text/plain", "OK");
 }
 
 void handleNanoLine(const String &line) {
   if (line.startsWith("SOIL:")) {
-    int moisture, raw, pump, fault, fan = 0;
-    // Nano chay code cu (chua co quat) chi gui 4 truong: van nhan, coi nhu quat tat
-    if (sscanf(line.c_str() + 5, "%d,%d,%d,%d,%d", &moisture, &raw, &pump, &fault, &fan) >= 4) {
+    int moisture, raw, pump, fault, mist = 0;
+    // Nano chay code cu (chua co quat/phun suong) chi gui 4 truong: van nhan, coi nhu dang tat
+    if (sscanf(line.c_str() + 5, "%d,%d,%d,%d,%d", &moisture, &raw, &pump, &fault, &mist) >= 4) {
       soilMoisture = moisture;
       soilRaw = raw;
       soilPump = pump == 1;
       soilFault = fault == 1;
-      soilFan = fan == 1;
+      soilMist = mist == 1;
       soilTime = millis();
     }
   } else if (line.length() > 0) {
-    Serial.printf("[Nano] %s\n", line.c_str());  // Vd "AI OK: BENH 99%" xac nhan Nano da nhan
+    if (line.startsWith("AI OK")) {
+      aiPending = false;  // Nano da nhan ket qua moi
+    }
+    Serial.printf("[Nano] %s\n", line.c_str());
   }
 }
 
@@ -227,20 +304,26 @@ void handleStatus() {
   char soil[120] = "null";
   if (soilTime > 0) {
     snprintf(soil, sizeof(soil),
-             "{\"moisture\":%d,\"raw\":%d,\"pump\":%s,\"fault\":%s,\"fan\":%s,\"age_s\":%lu}",
+             "{\"moisture\":%d,\"raw\":%d,\"pump\":%s,\"fault\":%s,\"mist\":%s,\"age_s\":%lu}",
              soilMoisture, soilRaw, soilPump ? "true" : "false", soilFault ? "true" : "false",
-             soilFan ? "true" : "false", (millis() - soilTime) / 1000);
+             soilMist ? "true" : "false", (millis() - soilTime) / 1000);
+  }
+  char clock[16] = "null";  // Gio cua ESP, "null" khi chua lay duoc gio (qua Internet hoac tu app)
+  struct tm t;
+  if (time(nullptr) > MIN_VALID_TIME && getLocalTime(&t, 0)) {
+    snprintf(clock, sizeof(clock), "\"%02d:%02d:%02d\"", t.tm_hour, t.tm_min, t.tm_sec);
   }
   // ip/rssi/bssid: WiFi nha ("0.0.0.0" khi chua vao duoc; bssid = router hay bo kich song nao).
-  // ap_ip/ap_clients: WiFi rieng TuoiCay-CAM
-  char json[512];
+  // ap_ip/ap_clients: WiFi rieng TuoiCay-CAM. leaf/fruit/mist_mode: ket qua AI gan nhat
+  char json[768];
   snprintf(json, sizeof(json),
-           "{\"uptime_s\":%lu,\"wifi_ok\":%s,\"ip\":\"%s\",\"rssi\":%d,\"bssid\":\"%s\",\"ap_ip\":\"%s\","
-           "\"ap_clients\":%d,\"psram\":%s,\"free_heap\":%u,\"last_result\":\"%s\",\"soil\":%s}",
-           millis() / 1000, staConnected ? "true" : "false", WiFi.localIP().toString().c_str(),
+           "{\"uptime_s\":%lu,\"time\":%s,\"wifi_ok\":%s,\"ip\":\"%s\",\"rssi\":%d,\"bssid\":\"%s\",\"ap_ip\":\"%s\","
+           "\"ap_clients\":%d,\"psram\":%s,\"free_heap\":%u,\"leaf\":\"%s\",\"fruit\":\"%s\",\"mist_mode\":%d,"
+           "\"soil\":%s}",
+           millis() / 1000, clock, staConnected ? "true" : "false", WiFi.localIP().toString().c_str(),
            staConnected ? WiFi.RSSI() : 0, staConnected ? WiFi.BSSIDstr().c_str() : "",
-           WiFi.softAPIP().toString().c_str(), WiFi.softAPgetStationNum(),
-           psramFound() ? "true" : "false", ESP.getFreeHeap(), lastResult.c_str(), soil);
+           WiFi.softAPIP().toString().c_str(), WiFi.softAPgetStationNum(), psramFound() ? "true" : "false",
+           ESP.getFreeHeap(), leafLine.c_str(), fruitLine.c_str(), mistMode, soil);
   server.send(200, "application/json", json);
 }
 
@@ -342,6 +425,7 @@ void checkWifi(unsigned long now) {
       staConnected = true;
       Serial.printf("Da ket noi \"%s\". IP: %s  ->  http://%s.local/capture\n", WIFI_SSID,
                     WiFi.localIP().toString().c_str(), HOSTNAME);
+      configTzTime(TZ_VN, "pool.ntp.org", "time.google.com");  // Lay gio qua Internet, tu chinh lai moi gio
     }
     lastWifiOk = now;
     return;
@@ -392,7 +476,16 @@ void setup() {
 
   Serial2.begin(9600, SERIAL_8N1, NANO_RX_PIN, NANO_TX_PIN);
   prefs.begin("ai", false);
-  lastResult = prefs.getString("result", "");  // Ket qua truoc khi mat dien, loop() se gui lai cho Nano
+  if (prefs.isKey("result")) {
+    prefs.remove("result");  // Ket qua dang cu (1 dong 16 ky tu), khong dung nua
+  }
+  // Kiem tra isKey truoc: doc khoa chua co thi thu vien in loi "NOT_FOUND" moi lan khoi dong
+  leafLine = prefs.isKey("leaf") ? prefs.getString("leaf") : "";
+  fruitLine = prefs.isKey("fruit") ? prefs.getString("fruit") : "";
+  mistMode = prefs.getInt("mist", MIST_NORMAL);  // Che do phun truoc khi mat dien, loop() gui lai cho Nano
+  // Dat mui gio ngay tu dau: gio lay tu dien thoai (khi khong co Internet) cung can mui gio de doi ra gio VN
+  setenv("TZ", TZ_VN, 1);
+  tzset();
 
   if (!initCamera()) {
     Serial.println("Kiem tra cap camera, nguon 5V >= 2A. Khoi dong lai sau 5 giay...");
@@ -429,8 +522,17 @@ void loop() {
   readNano();
 
   unsigned long now = millis();
-  if (lastResult.length() > 0 && (lastResultSent == 0 || now - lastResultSent >= RESULT_RESEND_MS)) {
-    sendResultToNano();
+  // Che do phun + gio: luc moi khoi dong, moi 60 giay, va ngay khi vua lay duoc gio
+  if (lastNanoSync == 0 || now - lastNanoSync >= NANO_SYNC_MS || (!timeSentToNano && time(nullptr) > MIN_VALID_TIME)) {
+    syncNano();
+  }
+  if (aiPending && now - aiLastTry >= AI_RETRY_MS) {
+    if (aiTries < AI_MAX_TRIES) {
+      sendAiToNano();
+    } else {
+      aiPending = false;
+      Serial.println("Nano khong tra loi \"AI OK\": kiem tra day IO13 - LV2, HV2 - D8, hoac Nano chay code cu");
+    }
   }
 
   if (now - lastWifiCheck >= WIFI_CHECK_MS) {

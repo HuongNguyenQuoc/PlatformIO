@@ -83,5 +83,5 @@ CAPTURE_TIMES = ["08:00", "16:00"]  # Gio chup anh + phan tich moi ngay
 # ===== Arduino Nano (service.py) =====
 SERIAL_PORT = "/dev/ttyUSB0"  # Nano clone (chip CH340) -> /dev/ttyUSB0; Nano chinh hang -> /dev/ttyACM0
 SERIAL_BAUD = 9600            # Phai trung voi Serial.begin() trong src/main.cpp
-RESEND_SECONDS = 60           # Gui lai ket qua dinh ky, phong khi Nano bi reset
+RESEND_SECONDS = 60           # Gui lai che do phun suong + gio dinh ky, phong khi Nano bi reset
 MOISTURE_LOG_SECONDS = 60     # Ghi do am Arduino gui len vao CSV toi da 1 lan / 60 giay

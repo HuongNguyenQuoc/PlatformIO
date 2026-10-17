@@ -2,7 +2,7 @@
 
 Hệ thống gồm Arduino Nano (tưới cây, LCD, 2 relay) và ESP32-CAM (chụp ảnh, nhận kết quả AI từ app). Hai bo nói chuyện với nhau qua 2 dây UART đi qua module BSS138: ESP chạy 3,3 V còn Nano chạy 5 V.
 
-Bản này khớp với firmware [`src/main.cpp`](../src/main.cpp) (Nano) và [`esp32cam/src/main.cpp`](../esp32cam/src/main.cpp), kiểm tra ngày 08/10/2026. Đổi chân trong code thì sửa cả file này.
+Bản này khớp với firmware [`src/main.cpp`](../src/main.cpp) (Nano) và [`esp32cam/src/main.cpp`](../esp32cam/src/main.cpp), kiểm tra ngày 17/10/2026. Đổi chân trong code thì sửa cả file này.
 
 ## 1. Chân Arduino Nano
 
@@ -11,13 +11,13 @@ Bản này khớp với firmware [`src/main.cpp`](../src/main.cpp) (Nano) và [`
 | D12, D11, D5, D4, D3, D2 | LCD 1602: RS, E, D4, D5, D6, D7 | `LiquidCrystal lcd(12, 11, 5, 4, 3, 2)` |
 | A0 | Cảm biến độ ẩm đất (AOUT) | Cảm biến điện dung |
 | D7 | Relay bơm (IN1) | `RELAY_PIN` |
-| D6 | Relay quạt (IN2 nếu dùng module 2 kênh) | `FAN_PIN` |
+| D6 | Relay máy phun sương (IN2 nếu dùng module 2 kênh) | `MIST_PIN` |
 | D8 (RX) | BSS138 HV2 | Nhận từ ESP IO13 |
 | D9 (TX) | BSS138 HV1 | Gửi sang ESP IO14 |
 | 5V | Ray 5V của Nano | Khoảng 4,7 V sau diode 1N5819 |
 | GND | GND chung | |
 
-Cả 2 relay đều **kích mức LOW** (`RELAY_ACTIVE` và `FAN_RELAY_ACTIVE` đều là `LOW`). Nếu relay của bạn kích mức HIGH thì đổi 2 hằng này thành `HIGH`.
+Cả 2 relay đều **kích mức LOW** (`RELAY_ACTIVE` và `MIST_RELAY_ACTIVE` đều là `LOW`). Nếu relay của bạn kích mức HIGH thì đổi 2 hằng này thành `HIGH`.
 
 ## 2. Chân ESP32-CAM (AI-Thinker)
 
@@ -49,7 +49,7 @@ Camera OV2640 cắm bằng cáp dẹt có sẵn trên bo, không phải nối d�
 
 Không đảo HV với LV. Khi chưa truyền dữ liệu, HV1 và HV2 đo khoảng 4,7 V, còn LV1 và LV2 đo khoảng 3,3 V.
 
-## 4. Relay bơm và relay quạt
+## 4. Relay bơm và relay phun sương
 
 Phía điều khiển (dùng module relay 2 kênh, hoặc 2 module 1 kênh):
 
@@ -58,7 +58,7 @@ Phía điều khiển (dùng module relay 2 kênh, hoặc 2 module 1 kênh):
 | VCC | Ray 5V của Nano |
 | GND | GND chung |
 | IN1 | Nano D7 (bơm) |
-| IN2 | Nano D6 (quạt) |
+| IN2 | Nano D6 (phun sương) |
 
 ### Mạch bơm (phía tải của relay 1)
 
@@ -72,31 +72,46 @@ Phía điều khiển (dùng module relay 2 kênh, hoặc 2 module 1 kênh):
 
 Chân NC của relay để trống. Không lấy nguồn bơm từ chân 5V của Nano: dòng khởi động của bơm làm sụt áp, khiến Nano bị reset và LCD ra ký tự rác.
 
-### Mạch quạt 5V 0,18 A (phía tải của relay 2)
+### Mạch máy phun sương mini 5V (phía tải của relay 2)
 
 | Từ | Đến | Ghi chú |
 |---|---|---|
 | Ray 5V-ADP (+) | Relay 2 COM | |
-| Relay 2 NO | Dây đỏ của quạt | Quạt tắt khi Nano mất nguồn |
-| Dây đen của quạt | GND chung | |
-| Diode 1N4007 | Song song với quạt | Vạch (cathode) quay về dây đỏ |
+| Relay 2 NO | (+) của module phun sương | Phun sương tắt khi Nano mất nguồn |
+| (−) của module phun sương | GND chung | |
 
-Quạt lấy điện từ adapter, nên khi chỉ cắm USB laptop thì relay 2 vẫn kêu tách nhưng quạt không quay. Firmware bật quạt theo kết quả AI gần nhất: `BENH` bật 10 phút / tắt 20 phút, `NGHI` bật 5 phút / tắt 25 phút, các kết quả khác thì tắt.
+- Module phun sương có mạch điện tử riêng nên không cần diode như quạt hay bơm.
+- **Thử trước khi lắp:** cắm module thẳng vào 5V xem nó có **tự phun ngay khi có điện** không. Loại có nút bấm (có điện vẫn tắt, phải bấm mới phun) thì relay không bật được.
+- Module lấy điện từ ray 5V-ADP, nên khi chỉ cắm USB laptop thì relay 2 vẫn kêu tách nhưng không phun. Đừng để module chạy khi cốc hết nước.
+
+**Khi nào phun** (firmware tự làm, cần biết giờ thật từ ESP32-CAM hoặc laptop):
+
+| Điều kiện | Phun sương |
+|---|---|
+| Lá khỏe (hoặc chưa có kết quả AI), 8h–16h | 30 giây, 30 phút 1 lần (đúng :00 và :30) |
+| Sau 16h và ban đêm | Không phun, để lá kịp khô trước tối |
+| AI báo bệnh nấm / vi khuẩn, hoặc nghi bệnh bất kỳ | Dừng hẳn, đến khi AI báo lá khỏe lại |
+| AI chắc chắn nhện đỏ (≥ 90%) | 30 giây, 15 phút 1 lần, vẫn chỉ 8h–16h |
+| Virus khảm lá, xoăn vàng lá | Phun bình thường |
+| Ảnh tối hoặc không thấy lá | Giữ nguyên chế độ đang chạy |
+| Chưa biết giờ | Không phun |
+
+Đổi thời gian ở các hằng `MIST_*` trong `src/main.cpp`.
 
 ## 5. Nguồn điện
 
-Mạch dùng 3 nguồn. GND của USB, adapter, Nano, ESP32-CAM, BSS138 và quạt nối chung với nhau, riêng nguồn bơm thì không.
+Mạch dùng 3 nguồn. GND của USB, adapter, Nano, ESP32-CAM, BSS138 và máy phun sương nối chung với nhau, riêng nguồn bơm thì không.
 
 | Nguồn | Cấp cho | Nối vào GND chung? |
 |---|---|---|
 | USB laptop → cổng USB của Nano | Nano khi nạp code, và Serial 9600 tới laptop | Có, qua cáp USB |
-| Adapter 5V 2A → ray 5V-ADP | Chân 5V của ESP32-CAM, chân 5V của Nano qua diode 1N5819, và quạt qua COM–NO của relay 2 | Có. Bắt buộc phải nối thì UART mới chạy |
+| Adapter 5V 2A → ray 5V-ADP | Chân 5V của ESP32-CAM, chân 5V của Nano qua diode 1N5819, và máy phun sương qua COM–NO của relay 2 | Có. Bắt buộc phải nối thì UART mới chạy |
 | Adapter hoặc pin 5V riêng cho bơm | Bơm, đi qua COM–NO của relay 1 | Không, relay đã cách ly hai phía |
 
 - **Diode 1N5819:** đầu không có vạch cắm vào ray 5V-ADP, đầu có vạch cắm vào ray 5V của Nano. Diode chặn USB và adapter đẩy dòng ngược vào nhau, nên cắm cả hai cùng lúc vẫn an toàn.
 - **Ray 5V của Nano** (khoảng 4,7 V sau diode) nuôi LCD, biến trở, cảm biến, cuộn hút của 2 relay và chân HV của BSS138.
 - **Tụ 470–1000 µF** nằm giữa 5V và GND, sát chân ESP32-CAM: chân dài (+) vào 5V, phía có vạch (−) vào GND.
-- **Dòng trên adapter** khoảng 0,65 A: ESP32-CAM khoảng 0,25 A (hơn khi bật flash), ray Nano khoảng 0,2 A, quạt 0,18 A. Adapter 2 A dư sức. Diode 1N5819 chịu 1 A, chỉ phải gánh phần ray Nano.
+- **Dòng trên adapter** khoảng 0,9 A: ESP32-CAM khoảng 0,25 A (hơn khi bật flash), ray Nano khoảng 0,2 A, máy phun sương mini thường 0,3–0,5 A (đo lại module của bạn). Adapter 2 A đủ. Diode 1N5819 chịu 1 A, chỉ phải gánh phần ray Nano.
 - **Đổi nguồn từ USB sang adapter có thể làm giá trị Raw của cảm biến lệch đi.** Ghi lại Raw lúc khô và lúc nhúng nước, rồi sửa `airValue` và `waterValue` trong `src/main.cpp` nếu cần.
 
 ## 6. Nạp code
@@ -128,20 +143,22 @@ Cả 2 bên chạy 9600 baud, 8N1:
 
 | Chiều | Dòng gửi | Khi nào |
 |---|---|---|
-| ESP → Nano | `AI:<tối đa 16 ký tự>`, vd `AI:BENH 99%` | Khi app gửi `POST /result`, sau đó gửi lại mỗi 60 giây |
-| Nano → ESP | `AI OK: <text>` | Trả lời mỗi dòng `AI:` |
-| Nano → ESP | `SOIL:<độ ẩm %>,<raw>,<bơm 0/1>,<lỗi cảm biến 0/1>,<quạt 0/1>` | Mỗi 5 giây; ESP đưa lên `/status` |
+| ESP → Nano | `MIST:<1-3>`: chế độ phun sương (1 bình thường, 2 dừng, 3 phun tăng) | Lúc ESP khởi động, mỗi 60 giây, và trước mỗi dòng `AI:` |
+| ESP → Nano | `TIME:hh:mm:ss`, vd `TIME:14:05:37` | Như dòng `MIST`, nhưng chỉ khi ESP đã biết giờ (qua Internet, hoặc lấy từ app) |
+| ESP → Nano | `AI:<dòng lá>\|<dòng quả>`, mỗi dòng tối đa 40 ký tự, vd `AI:La ca chua: Moc suong 97%\|Qua ca chua: Tuoi 92%` | Chỉ khi app gửi kết quả mới (`POST /result`). Nano hiện 20 giây. Không có `AI OK` sau 2 giây thì ESP gửi lại, tối đa 3 lần |
+| Nano → ESP | `AI OK` | Trả lời mỗi dòng `AI:` |
+| Nano → ESP | `SOIL:<độ ẩm %>,<raw>,<bơm 0/1>,<lỗi cảm biến 0/1>,<phun sương 0/1>` | Mỗi 5 giây; ESP đưa lên `/status` |
 
-Nano cũng nhận dòng `AI:` qua cáp USB (từ `ai/service.py` hoặc Serial Monitor), nên vẫn chạy được khi chưa có ESP.
+Nano cũng nhận các dòng `AI:`, `MIST:`, `TIME:` qua cáp USB (từ `ai/service.py` hoặc Serial Monitor), nên vẫn chạy được khi chưa có ESP. Giữa 2 lần nhận `TIME`, Nano tự đếm giờ; mất `TIME` quá 12 giờ thì coi như không biết giờ.
 
 ### Kiểm tra sau khi nối
 
 1. Cắm adapter, chưa cần app. Đo áp khi nghỉ: HV1 và HV2 khoảng 4,7 V, LV1 và LV2 khoảng 3,3 V.
 2. **Chiều ESP → Nano:** từ laptop cùng WiFi, chạy
    ```bash
-   curl -X POST -H "Content-Type: text/plain" --data-binary "TEST 123" http://<IP>/result
+   curl -X POST -H "Content-Type: text/plain" --data-binary $'TEST 123\nDong 2 thu\n0' http://<IP>/result
    ```
-   Dòng 2 của LCD phải luân phiên giữa `Bom:... R:...` và `TEST 123` mỗi 3 giây. Dùng `TEST` để thử vì gửi `BENH` hoặc `NGHI` sẽ bật quạt. Gửi `--data-binary ""` để xóa kết quả.
+   LCD phải hiện `TEST 123` / `Dong 2 thu` trong 20 giây rồi quay về `Do am: ...` / `Bom:... Phun:...`. Số `0` ở cuối giữ nguyên chế độ phun sương. Log của ESP phải in `[Nano] AI OK`.
 3. **Chiều Nano → ESP:** mở `http://<IP>/status`. Mục `soil` phải khác `null` và `age_s` nhỏ hơn 10.
 
 | Hiện tượng | Kiểm tra |
@@ -149,4 +166,5 @@ Nano cũng nhận dòng `AI:` qua cáp USB (từ `ai/service.py` hoặc Serial M
 | LCD không hiện `TEST 123` | Dây IO13 – LV2, HV2 – D8, GND chung giữa adapter và Nano |
 | `/status` có `"soil":null`, hoặc `age_s` tăng mãi | Dây D9 – HV1, LV1 – IO14 |
 | Cả 2 chiều đều không chạy | Chân HV/LV của BSS138 có bị đảo không, HV có 4,7 V và LV có 3,3 V không, GND chung |
-| LCD hiện `MAT KET NOI ESP` | Nano không nhận được dòng `AI:` nào trong 3 phút: ESP mất nguồn hoặc treo, hoặc dây D8 lỏng |
+| Màn hình chính hiện giờ `--:--` | Nano chưa nhận được dòng `TIME` (nên không phun sương). Xem `/status`: `"time":null` là ESP chưa biết giờ (chưa vào được WiFi có Internet, app chưa gửi kết quả nào). ESP có giờ mà LCD vẫn `--:--` thì kiểm tra dây IO13 – LV2, HV2 – D8 |
+| ESP in `Nano khong tra loi "AI OK"` | Dây IO13 – LV2, HV2 – D8, hoặc Nano còn chạy firmware cũ |
