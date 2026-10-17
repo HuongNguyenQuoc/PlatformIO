@@ -1,13 +1,17 @@
 """Cham diem model da train tren cac tap test: accuracy, macro-F1, bao cao tung lop,
 ma tran nham lan, va chi so khoe/benh (dung dung nguong nhu predict.py).
 
-Cach chay: python evaluate.py                     (danh gia ca test_pv va test_real)
+Cach chay: python evaluate.py                     (danh gia test_pv, test_real va test_leaf)
            python evaluate.py --split test_real
+           python evaluate.py --model models/best_old.pt   (cham 1 model khac de so sanh)
+           python evaluate.py --scenes        (cham ca quy trinh predict.py: tim la + bo phieu, tren anh test_real)
 """
 import argparse
+from pathlib import Path
 
 import numpy as np
 import torch
+from PIL import Image
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -70,15 +74,48 @@ def report(split, probs, labels, class_names):
     return acc, f1
 
 
+def evaluate_scenes(predictor, split: str = "test_real") -> None:
+    """Cham ca quy trinh predict.py tren anh nguyen (anh chup ca vuon, nhieu la): Benh/Nghi/Khoe va dung ten lop."""
+    rows = []
+    for cls_dir in sorted(p for p in (config.DATA_DIR / split).iterdir() if p.is_dir()):
+        for path in sorted(cls_dir.glob("*.jpg")):
+            with Image.open(path) as img:
+                rows.append((cls_dir.name, predictor.analyze(img)))
+
+    def count(group, level):
+        return sum(r["status"] == "ok" and r["level"] == level for _, r in group)
+
+    print(f"\n{'=' * 70}\nCa quy trinh tren {split}: {len(rows)} anh\n{'=' * 70}")
+    for name, group in (("benh", [x for x in rows if not x[0].endswith("_healthy")]),
+                        ("khoe", [x for x in rows if x[0].endswith("_healthy")])):
+        no_leaf = sum(r["status"] != "ok" for _, r in group)
+        print(f"  {len(group):>3} anh {name}: Benh {count(group, 'diseased'):>3}  Nghi {count(group, 'suspect'):>3}  "
+              f"Khoe {count(group, 'healthy'):>3}  Khong thay la {no_leaf:>3}")
+
+    # Dung ten lop: anh bi bao Benh/Nghi thi so ten benh, anh bao Khoe thi so lop "khoe" (cay gi)
+    correct = sum(r["status"] == "ok" and cls == (r["healthy_class"] if r["level"] == "healthy" else r["disease_class"])
+                  for cls, r in rows)
+    print(f"  Dung ten lop: {correct}/{len(rows)} = {correct / len(rows):.1%}")
+    leaves = [len(r["regions"]) for _, r in rows if r["status"] == "ok"]
+    if leaves:
+        print(f"  So la cham diem moi anh: trung binh {np.mean(leaves):.1f}, nhieu nhat {max(leaves)}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Danh gia model tren tap test")
-    parser.add_argument("--split", choices=["val", "test_pv", "test_real"], nargs="+",
-                        default=["test_pv", "test_real"])
+    parser.add_argument("--split", choices=["val", "test_pv", "test_real", "test_leaf"], nargs="+",
+                        default=["test_pv", "test_real", "test_leaf"])
+    parser.add_argument("--model", type=Path, default=config.MODEL_PATH)
+    parser.add_argument("--scenes", action="store_true", help="Cham ca quy trinh predict.py tren anh test_real")
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, class_names = load_trained_model(config.MODEL_PATH, device)
+    if args.scenes:
+        from predict import Predictor  # Can them model tim la (models/leaf_detector.onnx)
+        evaluate_scenes(Predictor(args.model, device=device))
+        return
+    model, class_names = load_trained_model(args.model, device)
     print("Cac lop:")
     for i, name in enumerate(class_names):
         print(f"  {i:>2} {name}")

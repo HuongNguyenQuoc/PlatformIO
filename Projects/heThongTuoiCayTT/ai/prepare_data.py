@@ -1,10 +1,15 @@
-"""Gom anh PlantVillage + PlantDoc thanh 4 tap de train va danh gia model.
+"""Gom anh PlantVillage + PlantDoc thanh 5 tap de train va danh gia model.
 
 Dau ra (moi lop la 1 thu muc con):
-    data/train/<lop>/      80% PlantVillage + toan bo PlantDoc train + 70% anh tu chup
+    data/train/<lop>/      80% PlantVillage + toan bo PlantDoc train + tung la cat tu PlantDoc Object Detection
+                           + 70% anh tu chup
     data/val/<lop>/        10% PlantVillage
     data/test_pv/<lop>/    10% PlantVillage
     data/test_real/<lop>/  PlantDoc test + 30% anh tu chup (anh chup ngoai vuon that)
+    data/test_leaf/<lop>/  Tung la cat tu anh PlantDoc test (dung kieu anh model tim la dua vao model benh)
+
+La cat tu PlantDoc Object Detection (neu da tai, xem prepare_detector_data.py): moi khung la co ten benh rieng,
+cat bang dung ham leaf_crop_box() (detector.py) ma predict.py dung. Anh trung test_real chi vao test_leaf, khong vao train.
 
 Anh tu chup (khong bat buoc) dat tai data/raw/own/<ten lop trong config.CLASSES>/*.jpg
 """
@@ -16,8 +21,10 @@ from PIL import Image, ImageOps
 from tqdm import tqdm
 
 import config
+from detector import leaf_crop_box
+from prepare_detector_data import plantdoc_od_images, read_voc
 
-SPLITS = ["train", "val", "test_pv", "test_real"]
+SPLITS = ["train", "val", "test_pv", "test_real", "test_leaf"]
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 
 def list_images(folder: Path) -> list[Path]:
@@ -26,14 +33,33 @@ def list_images(folder: Path) -> list[Path]:
         return []
     return sorted([f for f in folder.iterdir() if f.suffix.lower() in IMAGE_EXTS])
 
-def save_image(src: Path, dst: Path) -> bool:
-    """Doc anh, chuyen ve RGB, thu nho neu qua lon roi luu thanh JPEG.
+def plantdoc_leaves() -> dict[str, list[tuple[Path, tuple, str]]]:
+    """Cac khung la PlantDoc Object Detection thuoc 15 lop: {lop: [(anh, vung cat, tap)]}.
+    Chua tai bo nay thi tra ve rong (van chay duoc nhu cu)."""
+    leaves = {cls: [] for cls in config.CLASSES}
+    if not config.PD_OD_DIR.exists():
+        print(f"Khong co {config.PD_OD_DIR}: bo qua la cat tu PlantDoc Object Detection")
+        return leaves
+    pd_to_cls = {pd_name: cls for cls, (_, pd_name) in config.CLASSES.items() if pd_name}
+    for xml_path, img_path, in_test in plantdoc_od_images():
+        with Image.open(img_path) as img:
+            size = img.size
+        for name, box in read_voc(xml_path, size) or []:
+            if name in pd_to_cls and min(box[2] - box[0], box[3] - box[1]) >= config.LEAF_MIN_SIDE:
+                leaves[pd_to_cls[name]].append((img_path, leaf_crop_box(box, size), "test_leaf" if in_test else "train"))
+    return leaves
+
+
+def save_image(src: Path, dst: Path, crop: tuple | None = None) -> bool:
+    """Doc anh, chuyen ve RGB, (cat 1 vung neu co crop), thu nho neu qua lon roi luu thanh JPEG.
     Tra ve False neu anh bi hong khong doc duoc."""
     try:
         with Image.open(src) as img:
-            transposed = ImageOps.exif_transpose(img) # xoay anh dung chieu (anh dien thoai hay bi nam ngang)
-            if transposed is not None:
-                img = transposed
+            if crop is not None:
+                # Khung la PlantDoc ve tren pixel goc, chua xoay theo EXIF -> cat truoc, khong xoay
+                img = img.convert("RGB").crop(crop)
+            elif (transposed := ImageOps.exif_transpose(img)) is not None:
+                img = transposed # xoay anh dung chieu (anh dien thoai hay bi nam ngang)
             img = img.convert("RGB") # PNG trong suot / anh xam -> RGB 3 kenh mau
             img.thumbnail((config.MAX_SIZE, config.MAX_SIZE)) # just resize into smaller size, keep aspect ratio
             img.save(dst, format="JPEG", quality=95) # luu thanh JPEG de giam dung luong
@@ -57,9 +83,10 @@ def main():
             (config.DATA_DIR / split / cls).mkdir(parents=True, exist_ok=True)
 
     counts = {cls: dict.fromkeys(SPLITS, 0) for cls in config.CLASSES.keys()}
+    pd_leaves = plantdoc_leaves()
 
     for cls, (pv_name, pd_name) in config.CLASSES.items():
-        # 3. Lap danh sach viec can lam: (file nguon, tap dich, tien to ten file)
+        # 3. Lap danh sach viec can lam: (file nguon, tap dich, tien to ten file[, vung cat])
         jobs = []
 
         # PlantVillage: tron ngau nhien roi chia 80/10/10 NGAY TRONG TUNG LOP
@@ -83,10 +110,13 @@ def main():
         jobs += [(f, "test_real", "own") for f in own_files[:n_own_test]]
         jobs += [(f, "train", "own") for f in own_files[n_own_test:]]
 
-        # 4. Luu tung anh vao dung thu muc, ten file: pv_00012.jpg / pd_00345.jpg
-        for i, (src, split, prefix) in enumerate(tqdm(jobs, desc=cls, ncols=90)):
+        # Tung la cat tu PlantDoc Object Detection
+        jobs += [(f, split, "leaf", crop) for f, crop, split in pd_leaves[cls]]
+
+        # 4. Luu tung anh vao dung thu muc, ten file: pv_00012.jpg / pd_00345.jpg / leaf_01234.jpg
+        for i, (src, split, prefix, *crop) in enumerate(tqdm(jobs, desc=cls, ncols=90)):
             dst = config.DATA_DIR / split / cls / f"{prefix}_{i:05d}.jpg"
-            if save_image(src, dst):
+            if save_image(src, dst, crop[0] if crop else None):
                 counts[cls][split] += 1
 
     # 5. In bang thong ke so anh moi lop trong moi tap

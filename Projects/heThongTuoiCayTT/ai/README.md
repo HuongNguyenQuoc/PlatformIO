@@ -1,10 +1,10 @@
 # AI phát hiện bệnh cây – Hệ thống tưới cây TT
 
-ESP32-CAM chụp ảnh cây mỗi ngày. Laptop dùng CNN (EfficientNet-B0, PyTorch) để phân tích, rồi gửi kết quả xuống Arduino Nano. Nano hiện kết quả lên LCD 20 giây rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương), và dừng phun sương khi lá bị bệnh nấm hoặc vi khuẩn. App Android trong repo DetectDisease làm được việc tương tự laptop, gửi kết quả qua ESP32-CAM.
+ESP32-CAM chụp ảnh cây mỗi ngày. Laptop dùng 2 model: YOLO26n tìm từng chiếc lá, rồi CNN (EfficientNet-B0, PyTorch) chấm bệnh từng lá, rồi gửi kết quả xuống Arduino Nano. Nano hiện kết quả lên LCD 20 giây rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương), và dừng phun sương khi lá bị bệnh nấm hoặc vi khuẩn. App Android trong repo DetectDisease làm được việc tương tự laptop, gửi kết quả qua ESP32-CAM.
 
 ```text
 ESP32-CAM (ngoài vườn) ──WiFi: GET /capture──▶ Laptop: ai/service.py
-                                                 ├─ predict.py: chia ô, CNN chấm từng vùng lá
+                                                 ├─ predict.py: YOLO tìm lá, CNN chấm từng lá, bỏ phiếu
                                                  ├─ captures/<ngày>/  ảnh gốc + ảnh có khung
                                                  ├─ logs/ai_results.csv, logs/moisture.csv
                                                  └─ USB Serial "AI:BENH 97%\n" ──▶ Nano ──▶ LCD (20 giây)
@@ -15,11 +15,14 @@ ESP32-CAM (ngoài vườn) ──WiFi: GET /capture──▶ Laptop: ai/service.
 | File | Việc làm |
 |---|---|
 | `config.py` | Mọi cấu hình: đường dẫn, 15 lớp, ngưỡng bệnh, giờ chụp, cổng Serial, địa chỉ camera |
-| `prepare_data.py` | Gom PlantVillage và PlantDoc thành `data/train`, `val`, `test_pv`, `test_real` |
+| `prepare_data.py` | Gom PlantVillage và PlantDoc thành `data/train`, `val`, `test_pv`, `test_real`, `test_leaf` |
+| `prepare_detector_data.py` | Chuyển PlantDoc Object Detection (khung từng lá) sang dạng YOLO: `data/detector/` |
+| `train_detector.py` | Train model tìm lá YOLO26n, xuất `models/leaf_detector.onnx` |
+| `detector.py` | Chạy model tìm lá bằng onnxruntime, cắt vùng lá |
 | `model.py` | Tạo EfficientNet-B0, augmentation, đọc model đã train |
 | `train.py` | Train 2 pha (đóng băng backbone, rồi fine-tune toàn bộ) và lưu `models/best.pt` |
 | `evaluate.py` | Chấm điểm trên tập test: accuracy, F1, ma trận nhầm lẫn, chỉ số khỏe/bệnh |
-| `predict.py` | Phân tích ảnh hoặc webcam, chia ô, vẽ khung vùng bệnh |
+| `predict.py` | Phân tích ảnh hoặc webcam: tìm lá, chấm từng lá, bỏ phiếu, vẽ khung từng lá |
 | `service.py` | Chạy liên tục: chụp theo giờ, phân tích, ghi log, gửi xuống Arduino |
 | `../src/main.cpp` | Nano: tưới, phun sương theo giờ và theo AI, nhận kết quả AI qua Serial và hiện lên LCD |
 | `../esp32cam/` | Firmware ESP32-CAM: WiFi, mDNS `esp32cam.local`, các đường dẫn `/capture` và `/status` |
@@ -33,27 +36,47 @@ source .venv/bin/activate
 
 ## 1. Huấn luyện model (làm 1 lần)
 
+Tải dữ liệu PlantDoc Object Detection (ảnh vườn thật, mỗi chiếc lá có 1 khung, ~1.9 GB) một lần:
+
 ```bash
-python prepare_data.py   # ~35 giây
-python train.py          # ~22 phút trên RTX 2050, lưu models/best.pt
-python evaluate.py       # chấm điểm trên test_pv và test_real
+git clone --depth 1 https://github.com/pratikkayal/PlantDoc-Object-Detection-Dataset.git data/raw/plantdoc_od/repo
+pip install -r requirements.txt   # thêm onnxruntime, ultralytics
 ```
 
-Kết quả lần train ngày 07/10/2026:
+```bash
+python prepare_detector_data.py   # ~1 phút, tạo data/detector/
+python train_detector.py          # ~40 phút trên RTX 2050, xuất models/leaf_detector.onnx
+python prepare_data.py            # ~3 phút
+python train.py                   # ~25 phút trên RTX 2050, lưu models/best.pt
+python evaluate.py                # chấm từng ảnh/lá trên test_pv, test_real, test_leaf
+python evaluate.py --scenes       # chấm cả quy trình predict.py (tìm lá + bỏ phiếu) trên ảnh test_real
+```
+
+Ảnh nào trùng với `test_real` đều bị loại khỏi dữ liệu train của cả 2 model, để điểm chấm vẫn là điểm thật.
+
+Kết quả ngày 17/10/2026 (model bệnh train thêm 3.639 lá cắt từ PlantDoc; số trong ngoặc là model cũ 07/10):
 
 | Tập | Số ảnh | Đoán đúng tên bệnh (15 lớp) | Báo "Benh" đúng (ngưỡng 90%) |
 |---|---|---|---|
-| `val` (PlantVillage) | 2279 | 99,8% | – |
-| `test_pv` (PlantVillage) | 2279 | 99,7% | 99,8% (phát hiện 1953/1957 ảnh bệnh, báo nhầm 0/322 ảnh khỏe) |
-| `test_real` (PlantDoc, ảnh thật) | 102 | **58,8%** | **92,2%** (phát hiện 78/86 ảnh bệnh, báo nhầm 0/16 ảnh khỏe) |
+| `test_pv` (PlantVillage) | 2279 | 99,5% (99,7%) | phát hiện 1949/1957 ảnh bệnh, báo nhầm 0/322 ảnh khỏe |
+| `test_real` (PlantDoc, cả ảnh) | 102 | **61,8%** (58,8%) | phát hiện 75/86 ảnh bệnh, báo nhầm 0/16 ảnh khỏe |
+| `test_leaf` (từng lá cắt từ ảnh test_real) | 262 | **63,4%** (54,6%) | phát hiện 175/224 lá bệnh, báo nhầm 2/38 lá khỏe |
+
+**Cả quy trình** (`python evaluate.py --scenes`: tìm lá → chấm từng lá → bỏ phiếu) trên 102 ảnh `test_real`:
+
+| | Cách cũ: chia ô 3×3, lấy ô tệ nhất | Cách mới: tìm lá + bỏ phiếu |
+|---|---|---|
+| 86 ảnh bệnh → Bệnh / Nghi / Khỏe / Không thấy lá | 77 / 6 / 2 / 1 | 75 / 10 / 1 / 0 |
+| 16 ảnh khỏe → Bệnh / Nghi / Khỏe | 0 / 5 / 11 | 1 / 0 / **15** |
+| Đúng tên bệnh (86 ảnh bệnh) | 51 | **54** |
+
+Ảnh thử: lá khỏe + quả cà chua trước bị báo `NGHI 65%` (ô chứa quả bị chấm là mốc sương), nay là `KHOE 89%`. Ảnh ESP32-CAM chụp nhầm trần nhà trước báo `NGHI 75%`, nay là `KHONG THAY LA`.
 
 - Ngoài vườn, model **phân biệt khỏe hay bệnh khá tốt**, nhưng **hay nhầm giữa các bệnh trông giống nhau**.
   - Ví dụ: đốm vi khuẩn cà chua bị nhầm thành Septoria, bệnh sớm khoai tây bị nhầm thành bệnh muộn.
   - Vì vậy, LCD chỉ báo mức Khỏe / Nghi / Bệnh. Tên bệnh (in ra màn hình và trên app) chỉ là **gợi ý**. Xem chi tiết trong `logs/evaluate.log`.
-- **Vì sao ngưỡng "Benh" đặt cao (90%):**
-  - Ở ngưỡng 60%, model phát hiện được 84/86 ảnh bệnh, nhưng báo nhầm 5/16 ảnh cà chua khỏe ngoài thực tế. Những ảnh khỏe bị nhầm này có xác suất bệnh 64–87%.
-  - Với ngưỡng 90%, các ảnh đó rơi vào mức "Nghi" thay vì "Benh".
-  - Ngưỡng được chọn dựa trên chỉ 16 ảnh khỏe, nên khi có ảnh vườn của bạn, hãy chỉnh lại.
+- **Vì sao ngưỡng "Benh" đặt cao (90%):** ảnh lá khỏe ngoài vườn hay bị chấm xác suất bệnh 60–90%. Với ngưỡng 90%, các ảnh đó rơi vào mức "Nghi" thay vì "Benh". Ngưỡng được chọn dựa trên chỉ 16 ảnh khỏe, nên khi có ảnh vườn của bạn, hãy chỉnh lại.
+- Ảnh khỏe duy nhất còn bị báo "Benh" là ảnh chụp cận 1 chiếc lá (P(benh) 0,91): ảnh chỉ có 1 lá thì không có lá thứ 2 để bỏ phiếu.
 
 > **Điểm `test_real` mới là điểm thật.** PlantVillage là ảnh một chiếc lá đặt trên nền xám, chụp trong phòng lab, nên model đạt gần 100% trên đó. Ảnh ngoài vườn khó hơn nhiều. Cách cải thiện tốt nhất là tự gom ảnh vườn của bạn (xem mục 8).
 
@@ -66,14 +89,14 @@ python predict.py anh_cay.jpg --save anh_cay_ai.jpg              # lưu ảnh c�
 python predict.py --webcam                                       # chụp bằng webcam laptop (đưa 1 chiếc lá lại gần)
 ```
 
-**Cách đọc kết quả** (xác suất bệnh là mức cao nhất trong các vùng lá):
+**Cách đọc kết quả** (xác suất bệnh là của lá bệnh thứ 2, xem "Tìm lá trước, rồi bỏ phiếu" bên dưới):
 
 | LCD hiện | Nghĩa |
 |---|---|
 | `KHOE 85%` | Xác suất bệnh dưới 60%. Số hiện là mức tin cây khỏe |
 | `NGHI 75%` | 60–90%: nghi ngờ, nên ra xem cây |
 | `BENH 97%` | Từ 90% trở lên: có dấu hiệu bệnh. Tên bệnh xem trên màn hình laptop hoặc app; mã bệnh (bảng dưới) vẽ trên ảnh `_ai.jpg` |
-| `KHONG THAY LA` | Ảnh có quá ít màu lá, có thể camera bị lệch hướng |
+| `KHONG THAY LA` | Model tìm lá không thấy chiếc lá nào đủ rõ: camera lệch hướng, hoặc lá quá nhỏ/quá xa |
 | `ANH QUA TOI` | Chụp lúc trời tối |
 | `LOI CAMERA` | Laptop không lấy được ảnh từ ESP32-CAM |
 
@@ -88,7 +111,13 @@ Chữ trên hiện ở dòng 1 của LCD trong 20 giây, dòng 2 là `Khong ro q
 | TEB | Cà chua – đốm vòng (bệnh sớm) | TTS | Cà chua – đốm mục tiêu |
 | TLB | Cà chua – mốc sương (bệnh muộn) | TYC | Cà chua – virus xoăn vàng lá |
 
-**Ảnh lớn được chia ô.** Ảnh ESP32-CAM (1600×1200) được chia lưới 3×3, các ô chồng lên nhau một phần. Chỉ những ô có ít nhất 50% là lá mới được chấm điểm. Lý do: đất nâu rất dễ bị model nhầm thành vết bệnh hoại tử. Ảnh `*_ai.jpg` vẽ khung đỏ cho ô bệnh, cam cho ô nghi ngờ, xanh cho ô khỏe. Ô không có khung là ô ít lá nên bị bỏ qua.
+**Tìm lá trước, rồi bỏ phiếu.** Model bệnh chỉ học ảnh từng chiếc lá. Nếu đưa cả khung hình vào, quả cà chua, đất nâu hay thân cây cũng bị đoán thành một bệnh nào đó. Vì vậy:
+
+1. Model YOLO26n khoanh từng chiếc lá. Quả, đất, trời, chậu không phải lá nên bị bỏ. Lá quá nhỏ (cạnh dưới 32 px) cũng bị bỏ vì quá mờ. Chỉ giữ tối đa 12 lá chắc chắn nhất.
+2. Mỗi lá được cắt ra (hình vuông, rộng hơn khung 10%) và chấm điểm riêng.
+3. Bỏ phiếu: cần **ít nhất 2 lá** cùng vượt ngưỡng 90% mới báo `BENH`. Nếu chỉ 1 lá bệnh rõ thì báo `NGHI`. Ảnh chỉ có 1 lá thì lá đó tự quyết. Tên bệnh là bệnh được các lá bị nghi chọn nhiều nhất.
+
+Ảnh `*_ai.jpg` vẽ khung đỏ cho lá bệnh, cam cho lá nghi ngờ, xanh cho lá khỏe.
 
 ## 3. Arduino Nano
 
@@ -193,7 +222,9 @@ python service.py --port /dev/ttyACM0          # Nano chính hãng thường là
 |---|---|---|
 | `CAPTURE_TIMES` | `["08:00", "16:00"]` | Giờ chụp mỗi ngày. Nên chụp lúc trời sáng, tránh nắng gắt buổi trưa |
 | `DISEASE_THRESHOLD` / `SUSPECT_THRESHOLD` | 0.9 / 0.6 | Ngưỡng báo "Benh" và "Nghi". Tăng lên nếu báo nhầm nhiều, giảm xuống nếu hay bỏ sót |
-| `TILE_LEAF_MIN_RATIO` | 0.5 | Tỉ lệ lá tối thiểu để một ô được chấm điểm |
+| `MIN_VOTES` | 2 | Số lá phải cùng vượt ngưỡng mới báo "Benh". Tăng lên nếu báo nhầm nhiều |
+| `DET_CONF` | 0.35 | Điểm tin cậy tối thiểu của model tìm lá. Tăng lên nếu khoanh nhầm vật khác thành lá |
+| `LEAF_MIN_SIDE` / `MAX_LEAVES` | 32 / 12 | Bỏ lá nhỏ hơn 32 px; chỉ chấm tối đa 12 lá mỗi ảnh |
 | `CAMERA_URLS` | `esp32cam.local` | Có thể thêm IP dự phòng, ví dụ `"http://192.168.1.50/capture"` |
 | `CAMERA_FLASH` | False | Bật đèn flash khi chụp (trong nhà, thiếu sáng) |
 | `SERIAL_PORT` | `/dev/ttyUSB0` | Cổng Serial của Nano. Xem bằng lệnh `ls /dev/ttyUSB* /dev/ttyACM*` |
@@ -207,7 +238,8 @@ python service.py --port /dev/ttyACM0          # Nano chính hãng thường là
 | `LOI CAMERA` | Mở `http://esp32cam.local/capture` trên trình duyệt. Nếu không được, dùng IP với `--camera-url` |
 | ESP32-CAM khởi động lại liên tục | Thường do nguồn yếu (brownout). Dùng adapter 5V ≥ 2A và dây ngắn |
 | Ảnh bị lật ngược | Xoay camera, hoặc thêm `s->set_vflip(s, 1)` vào `initCamera()` |
-| Báo bệnh nhầm nhiều | Đặt camera gần lá hơn, tăng `DISEASE_THRESHOLD`, và xem ảnh `*_ai.jpg` để biết ô nào bị chấm nhầm |
+| Báo bệnh nhầm nhiều | Đặt camera gần lá hơn, tăng `MIN_VOTES` hoặc `DISEASE_THRESHOLD`, và xem ảnh `*_ai.jpg` để biết lá nào bị chấm nhầm |
+| Báo `KHONG THAY LA` dù có lá | Đặt camera gần hơn (lá phải to hơn 32 px trên ảnh), hoặc giảm `DET_CONF` |
 | VS Code báo `Import "torch" could not be resolved` | Bấm `Ctrl+Shift+P` → *Python: Select Interpreter* → chọn `ai/.venv/bin/python` |
 
 ## 8. Cải thiện độ chính xác cho vườn của bạn
