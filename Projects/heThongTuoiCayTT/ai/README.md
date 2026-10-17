@@ -1,13 +1,13 @@
 # AI phát hiện bệnh cây – Hệ thống tưới cây TT
 
-ESP32-CAM chụp ảnh cây mỗi ngày. Laptop dùng CNN (EfficientNet-B0, PyTorch) để phân tích, rồi gửi kết quả xuống Arduino Nano. Nano hiện kết quả lên LCD, luân phiên với trạng thái bơm.
+ESP32-CAM chụp ảnh cây mỗi ngày. Laptop dùng CNN (EfficientNet-B0, PyTorch) để phân tích, rồi gửi kết quả xuống Arduino Nano. Nano hiện kết quả lên LCD 20 giây rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương), và dừng phun sương khi lá bị bệnh nấm hoặc vi khuẩn. App Android trong repo DetectDisease làm được việc tương tự laptop, gửi kết quả qua ESP32-CAM.
 
 ```text
 ESP32-CAM (ngoài vườn) ──WiFi: GET /capture──▶ Laptop: ai/service.py
                                                  ├─ predict.py: chia ô, CNN chấm từng vùng lá
                                                  ├─ captures/<ngày>/  ảnh gốc + ảnh có khung
                                                  ├─ logs/ai_results.csv, logs/moisture.csv
-                                                 └─ USB Serial "AI:BENH 97%\n" ──▶ Nano ──▶ LCD dòng 2
+                                                 └─ USB Serial "AI:BENH 97%\n" ──▶ Nano ──▶ LCD (20 giây)
 ```
 
 ## Các file
@@ -21,7 +21,7 @@ ESP32-CAM (ngoài vườn) ──WiFi: GET /capture──▶ Laptop: ai/service.
 | `evaluate.py` | Chấm điểm trên tập test: accuracy, F1, ma trận nhầm lẫn, chỉ số khỏe/bệnh |
 | `predict.py` | Phân tích ảnh hoặc webcam, chia ô, vẽ khung vùng bệnh |
 | `service.py` | Chạy liên tục: chụp theo giờ, phân tích, ghi log, gửi xuống Arduino |
-| `../src/main.cpp` | Nano nhận dòng `AI:...` qua Serial và hiện lên LCD |
+| `../src/main.cpp` | Nano: tưới, phun sương theo giờ và theo AI, nhận kết quả AI qua Serial và hiện lên LCD |
 | `../esp32cam/` | Firmware ESP32-CAM: WiFi, mDNS `esp32cam.local`, các đường dẫn `/capture` và `/status` |
 
 Mọi lệnh Python bên dưới đều chạy trong thư mục `ai/`, sau khi đã bật venv:
@@ -76,7 +76,8 @@ python predict.py --webcam                                       # chụp bằng
 | `KHONG THAY LA` | Ảnh có quá ít màu lá, có thể camera bị lệch hướng |
 | `ANH QUA TOI` | Chụp lúc trời tối |
 | `LOI CAMERA` | Laptop không lấy được ảnh từ ESP32-CAM |
-| `MAT KET NOI ESP` | Hơn 3 phút Nano không nhận được kết quả (ESP32-CAM hoặc laptop gửi lại mỗi 60 giây) |
+
+Chữ trên hiện ở dòng 1 của LCD trong 20 giây, dòng 2 là `Khong ro qua` vì laptop chỉ có model lá. App Android gửi đủ 2 dòng, ghi rõ tên cây, ví dụ `La ca chua: Moc suong 97%` / `Qua ca chua: Tuoi 92%`. Dòng dài hơn 16 ký tự sẽ chạy chữ.
 
 | Mã | Bệnh | Mã | Bệnh |
 |---|---|---|---|
@@ -97,13 +98,39 @@ Nạp firmware mới (chạy ở thư mục gốc `heThongTuoiCayTT`):
 pio run -t upload
 ```
 
-Nano vẫn tưới như cũ. Có thêm 2 điểm mới:
-- Nano nhận các dòng `AI:<tối đa 16 ký tự>` từ 2 nguồn: cáp USB (laptop) và chân D8 (ESP32-CAM), rồi trả lời `AI OK: ...` về đúng nguồn đó.
-- Khi đã có kết quả AI, dòng 2 của LCD luân phiên mỗi 3 giây giữa `Bom:OFF R:812` và `BENH 97%` (không có chữ `AI:`).
-- Mỗi 5 giây Nano gửi `SOIL:<độ ẩm %>,<raw>,<bơm 0/1>,<lỗi cảm biến 0/1>,<quạt 0/1>` sang ESP32-CAM qua chân D9, để app xem độ ẩm qua `/status`.
-- **Quạt thông gió** (relay ở chân D6) chạy theo kết quả AI gần nhất: `BENH` bật 10 phút / tắt 20 phút, `NGHI` bật 5 phút / tắt 25 phút, còn lại tắt. Chu kỳ chỉ bắt đầu lại khi mức đổi (ESP gửi lại cùng kết quả mỗi 60 giây không làm quạt chạy mãi). LCD dòng 1 hiện `Q:ON` / `Q:OFF`. Đổi thời gian ở các hằng `FAN_*_MS` trong `../src/main.cpp`.
+Nano vẫn tưới như cũ. Phần mới:
 
-**Test không cần Python:** mở Serial Monitor (9600 baud, chọn kết thúc dòng là *Newline*), gõ `AI:Test 123` rồi Enter. Dòng 2 của LCD sẽ bắt đầu luân phiên. Gõ `AI:` (để trống) để xóa kết quả.
+**Màn hình chính** (lúc bật nguồn, và sau khi hết 20 giây hiện kết quả AI):
+
+```text
+Do am: 45% 14:05      độ ẩm đất + giờ (--:-- khi chưa biết giờ); cảm biến lỗi thì cả dòng là LOI CAM BIEN DAT
+Bom:CHO Phun:OFF      bơm: ON / OFF / CHO (chờ nước ngấm) / LOI (bơm bị khóa, bấm RESET); phun sương: ON / OFF
+```
+
+**Kết quả AI** hiện 20 giây mỗi lần có ảnh mới phân tích xong: dòng 1 là lá, dòng 2 là quả. Dòng dài hơn 16 ký tự thì chạy chữ.
+
+**Phun sương** (relay ở chân D6), chỉ phun khi đã biết giờ:
+
+- Lá khỏe: 30 giây, 30 phút 1 lần (đúng :00 và :30), chỉ từ 8h đến trước 16h.
+- Lá bệnh nấm / vi khuẩn, hoặc nghi bệnh: dừng hẳn, đến khi AI báo lá khỏe lại (lá ướt làm bệnh lan nhanh).
+- Nhện đỏ (≥ 90%): 30 giây, 15 phút 1 lần (nhện đỏ sợ ẩm). Virus khảm / xoăn lá: phun bình thường.
+- Đổi thời gian ở các hằng `MIST_*` trong `../src/main.cpp`.
+
+Nano nhận lệnh từ 2 nguồn: cáp USB (laptop) và chân D8 (ESP32-CAM):
+
+| Lệnh | Việc làm |
+|---|---|
+| `AI:<dòng lá>\|<dòng quả>` | Kết quả mới, hiện 20 giây. Nano trả lời `AI OK`. Không có `\|` thì dòng 2 là `Khong ro qua`. `AI:` để trống thì thôi hiện |
+| `MIST:<1-3>` | Chế độ phun sương: 1 bình thường, 2 dừng, 3 phun tăng |
+| `TIME:hh:mm:ss` | Giờ thật. Nano tự đếm tiếp giữa 2 lần nhận |
+
+Mỗi 5 giây Nano gửi `SOIL:<độ ẩm %>,<raw>,<bơm 0/1>,<lỗi cảm biến 0/1>,<phun sương 0/1>` sang ESP32-CAM qua chân D9, để app xem qua `/status`.
+
+**Test không cần Python:** mở Serial Monitor (9600 baud, chọn kết thúc dòng là *Newline*), gõ lần lượt:
+
+1. `TIME:08:29:50`: dòng 1 hiện `08:29`. Khoảng 10 giây sau là 08:30, dòng 2 thành `Phun:ON` trong 30 giây.
+2. `AI:La ca chua: Moc suong 97%|Qua ca chua: Tuoi 92%`: LCD hiện kết quả 20 giây, dòng 1 chạy chữ.
+3. `MIST:2`: dừng phun. `MIST:1`: phun lại bình thường.
 
 ## 4. ESP32-CAM
 
@@ -127,16 +154,18 @@ Các đường dẫn ESP32-CAM cung cấp:
 |---|---|
 | `/capture` | Ảnh JPEG 1600×1200 |
 | `/capture?flash=1` | Ảnh JPEG, có bật đèn flash lúc chụp |
-| `/status` | JSON gồm uptime, `wifi_ok`/`ip`/`rssi`/`bssid` của WiFi nhà, `ap_ip`/`ap_clients` của WiFi `TuoiCay-CAM`, heap, `last_result` (kết quả AI gần nhất) và `soil` (độ ẩm, bơm, quạt do Nano gửi lên, `null` nếu chưa nhận được) |
-| `POST /result` | App gửi kết quả AI dạng text (tối đa 16 ký tự, vd `BENH 99%`). ESP lưu vào bộ nhớ, gửi `AI:<text>` xuống Nano và gửi lại mỗi 60 giây |
+| `/status` | JSON gồm uptime, `time` (giờ ESP, `null` khi chưa biết giờ), `wifi_ok`/`ip`/`rssi`/`bssid` của WiFi nhà, `ap_ip`/`ap_clients` của WiFi `TuoiCay-CAM`, heap, `leaf`/`fruit`/`mist_mode` (kết quả AI gần nhất) và `soil` (độ ẩm, bơm, phun sương do Nano gửi lên, `null` nếu chưa nhận được) |
+| `POST /result` | App gửi kết quả AI dạng text 4 dòng: dòng lá, dòng quả (mỗi dòng tối đa 40 ký tự), chế độ phun (0 giữ nguyên, 1–3), giờ Unix của điện thoại. ESP lưu vào bộ nhớ và gửi xuống Nano 1 lần. Gửi 1 dòng (vd `BENH 99%`) vẫn được |
 | `/` | Trang xem thử |
+
+**Giờ của ESP.** Vào được WiFi có Internet thì ESP lấy giờ qua mạng (NTP, múi giờ Việt Nam). Chỉ phát `TuoiCay-CAM` (không có Internet) thì ESP lấy giờ của điện thoại ở lần app gửi kết quả đầu tiên. Mỗi 60 giây ESP gửi giờ và chế độ phun xuống Nano.
 
 **Hai mạng WiFi cùng lúc.** ESP vừa vào WiFi nhà, vừa tự phát WiFi `TuoiCay-CAM` (mật khẩu `AP_PASSWORD`, IP luôn là `192.168.4.1`), nên vẫn dùng được khi router hỏng hoặc mang đi nơi khác: điện thoại vào `TuoiCay-CAM`, bấm "Vẫn kết nối" khi Android báo không có Internet, app tự gọi `192.168.4.1`. Laptop cũng dùng được: `python service.py --camera-url http://192.168.4.1/capture`.
 
 - Khi có máy đang vào `TuoiCay-CAM`, ESP tạm ngừng dò tìm router để sóng không bị ngắt. Mất WiFi nhà quá 2 phút thì 1 phút mới thử lại 1 lần; quá 30 phút và không ai vào `TuoiCay-CAM` thì ESP khởi động lại.
 - Nếu router và bộ kích sóng phát cùng tên, ESP vào điểm mạnh nhất. Điểm nào vào được mà 10 giây không cấp IP (bộ kích sóng không chuyển dữ liệu của ESP) thì ESP bỏ qua 10 phút và vào điểm khác. Xem `bssid` trong `/status` để biết ESP đang dùng điểm nào.
 
-ESP32-CAM nói chuyện với Nano qua UART 9600 baud, đi qua module chuyển mức BSS138: IO13 (TX) → Nano D8, Nano D9 → IO14 (RX), GND chung. Thử không cần app: `curl -X POST -H "Content-Type: text/plain" --data-binary "BENH 99%" http://<IP>/result` (phải có `Content-Type: text/plain`, nếu không ESP sẽ không nhận được nội dung).
+ESP32-CAM nói chuyện với Nano qua UART 9600 baud, đi qua module chuyển mức BSS138: IO13 (TX) → Nano D8, Nano D9 → IO14 (RX), GND chung. Thử không cần app: `curl -X POST -H "Content-Type: text/plain" --data-binary $'La ca chua: Khoe 98%\nQua ca chua: Tuoi 92%\n0' http://<IP>/result` (phải có `Content-Type: text/plain`, nếu không ESP sẽ không nhận được nội dung; số `0` ở cuối giữ nguyên chế độ phun sương).
 
 ## 5. Chạy dịch vụ hằng ngày
 
@@ -174,7 +203,7 @@ python service.py --port /dev/ttyACM0          # Nano chính hãng thường là
 | Hiện tượng | Cách xử lý |
 |---|---|
 | `Chua mo duoc cong /dev/ttyUSB0` | Kiểm tra cáp USB và tên cổng (`ls /dev/ttyUSB* /dev/ttyACM*`). Tắt Serial Monitor đang mở |
-| LCD không hiện kết quả AI | Xem service có in `[Arduino] AI OK: ...` không. Nếu không, Nano đang chạy firmware cũ: nạp lại bằng `pio run -t upload` |
+| LCD không hiện kết quả AI | Xem service có in `[Arduino] AI OK` không. Nếu không, Nano đang chạy firmware cũ: nạp lại bằng `pio run -t upload` |
 | `LOI CAMERA` | Mở `http://esp32cam.local/capture` trên trình duyệt. Nếu không được, dùng IP với `--camera-url` |
 | ESP32-CAM khởi động lại liên tục | Thường do nguồn yếu (brownout). Dùng adapter 5V ≥ 2A và dây ngắn |
 | Ảnh bị lật ngược | Xoay camera, hoặc thêm `s->set_vflip(s, 1)` vào `initCamera()` |
