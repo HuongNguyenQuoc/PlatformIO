@@ -10,6 +10,8 @@ RAW_DIR = DATA_DIR / "raw"
 PV_DIR = RAW_DIR / "plantvillage" / "raw" / "color" # Anh PlantVillage goc
 PD_DIR = RAW_DIR / "plantdoc"
 OWN_DIR = RAW_DIR / "own"  # Anh tu chup vuon nha (khong bat buoc): own/<ten lop>/*.jpg
+PD_OD_DIR = RAW_DIR / "plantdoc_od" / "repo"  # PlantDoc Object Detection: anh vuon that + khung tung la (.xml)
+DETECTOR_DATA_DIR = DATA_DIR / "detector"     # Du lieu YOLO do prepare_detector_data.py tao ra
 
 MODELS_DIR = AI_DIR / "models"
 CAPTURES_DIR = AI_DIR / "captures"
@@ -22,7 +24,7 @@ CLASSES = {
     "Pepper_healthy":        ("Pepper,_bell___healthy", "Bell_pepper leaf"),
     "Potato_Early_blight":   ("Potato___Early_blight", "Potato leaf early blight"),
     "Potato_Late_blight":    ("Potato___Late_blight", "Potato leaf late blight"),
-    "Potato_healthy":        ("Potato___healthy", None),
+    "Potato_healthy":        ("Potato___healthy", "Potato leaf"),  # Chi ban Object Detection co (11 la)
     "Tomato_Bacterial_spot": ("Tomato___Bacterial_spot", "Tomato leaf bacterial spot"),
     "Tomato_Early_blight":   ("Tomato___Early_blight", "Tomato Early blight leaf"),
     "Tomato_Late_blight":    ("Tomato___Late_blight", "Tomato leaf late blight"),
@@ -63,13 +65,16 @@ MAX_SIZE = 512 # kich thuoc toi da cua anh dau vao cho model
 
 # ===== Phan tich anh (predict.py) =====
 MODEL_PATH = MODELS_DIR / "best.pt"
-# Nguong chon theo test_real (anh that): o 0.9 bat duoc 78/86 anh benh, khong bao nham anh khoe nao (0/16);
-# o 0.6 bat duoc 84/86 nhung bao nham 5/16 anh khoe. Anh khoe bi nham co P(benh) 0.64-0.87 -> roi vao "Nghi".
+DETECTOR_PATH = MODELS_DIR / "leaf_detector.onnx"  # Model YOLO tim tung chiec la (train_detector.py)
+DET_IMG_SIZE = 640       # Anh dua vao model tim la: 640x640 (thu nho giu ti le, phan thua to xam)
+# Nguong chon theo test_real (anh that). Quy trinh tim la + bo phieu voi model 17/10 (python evaluate.py --scenes):
+# 86 anh benh -> 75 "Benh", 10 "Nghi", 1 "Khoe"; 16 anh khoe -> 15 "Khoe", 1 "Benh" (anh chup can 1 la, P(benh) 0.91).
 DISEASE_THRESHOLD = 0.9  # Xac suat benh >= 90% thi bao "Benh"
 SUSPECT_THRESHOLD = 0.6  # 60-90% thi bao "Nghi" (nghi ngo, nen ra xem cay), duoi 60% la "Khoe"
-TILE_GRID = 3            # Anh lon duoc chia luoi 3x3 o (co chong lan) de soi tung vung la
-LEAF_MIN_RATIO = 0.15    # Ca anh co it hon 15% pixel mau la cay (xanh/vang) -> "Khong thay la"
-TILE_LEAF_MIN_RATIO = 0.5  # 1 o chi duoc cham diem khi >= 50% la la cay: o lan nhieu dat nau de bi nham la vet benh
+DET_CONF = 0.35          # Model tim la: khung co diem tin cay duoi muc nay thi bo
+LEAF_MIN_SIDE = 32       # La co canh ngan < 32 px (tren anh goc) thi bo: phong to len 224 chi con mo nhoe
+MAX_LEAVES = 12          # Chi cham diem toi da 12 la chac chan nhat (anh nhieu la van nhanh)
+MIN_VOTES = 2            # Can it nhat 2 la cung vuot nguong moi bao "Benh"; 1 la le chi bao "Nghi"
 DARK_MAX_BRIGHTNESS = 35 # Do sang trung binh (0-255) duoi muc nay thi coi la anh qua toi (ban dem)
 
 # ===== Camera ESP32-CAM (service.py) =====

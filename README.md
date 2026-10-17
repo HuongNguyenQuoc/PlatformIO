@@ -10,7 +10,7 @@ Hệ thống có thể:
 - Bảo vệ máy bơm khi cảm biến lỗi, hết nước hoặc bơm không làm độ ẩm tăng.
 - Điều khiển quạt thông gió dựa trên kết quả phát hiện bệnh.
 - Dùng ESP32-CAM để chụp ảnh cây qua Wi-Fi.
-- Dùng mô hình EfficientNet-B0/PyTorch trên máy tính để phân tích ảnh và cảnh báo cây khỏe, nghi bệnh hoặc bị bệnh.
+- Dùng 2 mô hình trên máy tính: YOLO26n tìm từng chiếc lá trong ảnh (bỏ qua quả, đất, chậu), rồi EfficientNet-B0/PyTorch chấm bệnh từng lá và bỏ phiếu để cảnh báo cây khỏe, nghi bệnh hoặc bị bệnh.
 - Gửi kết quả AI về Arduino Nano và lưu ảnh, log kết quả theo thời gian.
 
 > AI chỉ có mục đích cảnh báo sớm. Kết quả cần được kiểm tra lại bằng mắt thực tế tại vườn.
@@ -43,10 +43,13 @@ ESP32-CAM ── Wi-Fi ──> Máy tính chạy AI ── USB Serial ──> Ar
         │   └── secrets.example.ini
         ├── ai/                   # Mã nguồn huấn luyện và chạy AI
         │   ├── service.py        # Dịch vụ chạy tự động hằng ngày
-        │   ├── predict.py        # Phân tích ảnh/webcam
+        │   ├── predict.py        # Phân tích ảnh/webcam (tìm lá + chấm từng lá)
+        │   ├── detector.py       # Chạy model tìm lá (ONNX)
+        │   ├── train_detector.py # Huấn luyện model tìm lá YOLO26n
         │   ├── train.py          # Huấn luyện mô hình
         │   ├── evaluate.py       # Đánh giá mô hình
         │   ├── prepare_data.py   # Chuẩn bị dữ liệu
+        │   ├── prepare_detector_data.py  # Chuẩn bị dữ liệu tìm lá
         │   └── requirements.txt
         ├── docs/                 # Tài liệu đấu nối và vận hành
         └── test/                 # Test PlatformIO
@@ -186,12 +189,15 @@ Nếu đã có dữ liệu huấn luyện, chạy:
 cd Projects/heThongTuoiCayTT/ai
 source .venv/bin/activate
 
+python prepare_detector_data.py
+python train_detector.py
 python prepare_data.py
 python train.py
 python evaluate.py
+python evaluate.py --scenes
 ```
 
-Mô hình tốt nhất được lưu tại `models/best.pt`. Có thể thử dự đoán:
+Model bệnh được lưu tại `models/best.pt`, model tìm lá tại `models/leaf_detector.onnx` (cách tải dữ liệu xem `ai/README.md`). Có thể thử dự đoán:
 
 ```bash
 python predict.py data/test_real/Tomato_Late_blight/pd_02010.jpg

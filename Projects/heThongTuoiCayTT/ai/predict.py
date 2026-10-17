@@ -1,13 +1,16 @@
 """Phan tich 1 anh xem cay co dau hieu benh khong.
 
-Model duoc train tren anh tung chiec la, con ESP32-CAM chup ca cay (1600x1200). Vi vay anh lon duoc chia
-luoi o chong lan (config.TILE_GRID); o nao it mau la cay (dat, troi, chau...) thi bo qua. Toan anh + cac o
-con lai duoc model cham diem, xac suat benh cua anh = cao nhat trong cac vung.
+Model benh duoc train tren anh tung chiec la, con ESP32-CAM chup ca vuon: nhieu la, qua, dat, chau...
+Neu dua ca anh (hay tung o luoi) vao model benh, qua ca chua hay dat nau cung bi doan thanh 1 benh nao do.
+Vi vay lam 2 buoc:
+  1. Model tim la (YOLO26n, detector.py) khoanh tung chiec la. Qua, dat, troi... khong phai la nen bi bo.
+  2. Cat tung la dua vao model benh, roi gop bang bo phieu: phai co it nhat config.MIN_VOTES la cung benh
+     moi bao "Benh" (chi 1 la benh thi bao "Nghi"). Ten benh = benh duoc cac la bi nghi chon nhieu nhat.
 
 Cach chay:
     python predict.py anh.jpg                   Phan tich 1 anh
     python predict.py a.jpg b.jpg c.jpg         Phan tich nhieu anh (in gon moi anh 1 dong)
-    python predict.py anh.jpg --save out.jpg    Luu them anh co ve khung cac vung da phan tich
+    python predict.py anh.jpg --save out.jpg    Luu them anh co ve khung tung la da phan tich
     python predict.py --webcam                  Chup 1 khung hinh tu webcam laptop roi phan tich
 """
 import argparse
@@ -19,49 +22,46 @@ import torch
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 import config
-from model import IMG_SIZE, get_transforms, load_trained_model
-
-TILE_OVERLAP = 0.25  # Moi o rong hon 25% so voi chia deu -> cac o chong len nhau, khong cat doi vet benh
-
-
-def make_tiles(image: Image.Image, grid: int) -> list[tuple[tuple, tuple]]:
-    """Chia anh thanh luoi grid x grid. Tra ve list (khung o chong lan de phan tich, khung o luoi de ve).
-    Anh nho (o co canh ngan < IMG_SIZE) thi khong chia, vi phong to vung nho chi lam anh mo them."""
-    if grid < 2:
-        return []
-    w, h = image.size
-    tw = int(w / grid * (1 + TILE_OVERLAP))
-    th = int(h / grid * (1 + TILE_OVERLAP))
-    if min(tw, th) < IMG_SIZE:
-        return []
-    tiles = []
-    for row in range(grid):
-        for col in range(grid):
-            x = round(col * (w - tw) / (grid - 1))
-            y = round(row * (h - th) / (grid - 1))
-            cell = (col * w // grid, row * h // grid, (col + 1) * w // grid, (row + 1) * h // grid)
-            tiles.append(((x, y, x + tw, y + th), cell))
-    return tiles
+from detector import LeafDetector, leaf_crop_box
+from model import get_transforms, load_trained_model
 
 
-def color_stats(image: Image.Image) -> tuple[float, float]:
-    """Tra ve (ti le pixel co mau la cay, do sang trung binh 0-255)."""
-    hsv = np.asarray(image.resize((64, 64)).convert("HSV"), dtype=np.int16)
-    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    # Hue cua PIL tu 0-255 (tuong ung 0-360 do). 25..130 ~ 35..185 do: tu vang (la benh) den xanh la.
-    # Bo pixel nhat mau (nen xam, troi trang) va pixel qua toi.
-    plant = (h >= 25) & (h <= 130) & (s >= 50) & (v >= 40)
-    return float(plant.mean()), float(v.mean())
+def brightness(image: Image.Image) -> float:
+    """Do sang trung binh 0-255 (kenh V cua HSV)."""
+    return float(np.asarray(image.resize((64, 64)).convert("HSV"))[..., 2].mean())
+
+
+def disease_level(prob: float) -> str:
+    """Xep muc theo xac suat benh: duoi SUSPECT_THRESHOLD la khoe, tu DISEASE_THRESHOLD la benh, o giua la nghi."""
+    if prob >= config.DISEASE_THRESHOLD:
+        return "diseased"
+    if prob >= config.SUSPECT_THRESHOLD:
+        return "suspect"
+    return "healthy"
+
+
+def vote(disease_probs: list[float]) -> tuple[str, float]:
+    """Gop xac suat benh cua tung la thanh (muc, xac suat benh) cua ca anh.
+    Lay la "benh" thu MIN_VOTES (vd la benh nhi): no vuot nguong nghia la co it nhat MIN_VOTES la vuot nguong.
+    Anh chi co 1 la thi la do tu quyet."""
+    ranked = sorted(disease_probs, reverse=True)
+    score = ranked[min(config.MIN_VOTES, len(ranked)) - 1]
+    level = disease_level(score)
+    if level == "healthy" and ranked[0] >= config.DISEASE_THRESHOLD:
+        return "suspect", ranked[0]  # Chi 1 la benh ro: chua du phieu bao "Benh", nhung nen ra xem cay
+    return level, score
 
 
 class Predictor:
-    """Doc model 1 lan, sau do phan tich bao nhieu anh cung duoc."""
+    """Doc 2 model 1 lan, sau do phan tich bao nhieu anh cung duoc."""
 
-    def __init__(self, model_path: Path = config.MODEL_PATH, device: torch.device | None = None):
+    def __init__(self, model_path: Path = config.MODEL_PATH, detector_path: Path = config.DETECTOR_PATH,
+                 device: torch.device | None = None):
         if not Path(model_path).exists():
             raise SystemExit(f"Chua co model {model_path}. Hay chay 'python train.py' truoc.")
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model, self.class_names = load_trained_model(model_path, self.device)
+        self.detector = LeafDetector(detector_path)
         self.transform = get_transforms(train=False)
         self.healthy_idx = [i for i, name in enumerate(self.class_names) if name.endswith("_healthy")]
 
@@ -74,49 +74,49 @@ class Predictor:
     def analyze(self, image: Image.Image) -> dict:
         """Phan tich 1 anh. Ket qua la dict, xem cac khoa trong lenh return cuoi ham."""
         image = ImageOps.exif_transpose(image).convert("RGB")
-        leaf_ratio, brightness = color_stats(image)
-        tiles = make_tiles(image, config.TILE_GRID)
-        base = {"size": image.size, "leaf_ratio": leaf_ratio, "brightness": brightness,
-                "n_tiles": len(tiles), "regions": [], "level": "none", "is_diseased": False,
-                "disease_prob": 0.0, "disease_class": None, "disease_class_prob": 0.0}
+        base = {"size": image.size, "brightness": brightness(image), "n_found": 0, "regions": [],
+                "level": "none", "is_diseased": False, "disease_prob": 0.0, "disease_class": None,
+                "disease_class_prob": 0.0, "healthy_class": None}
 
-        if brightness < config.DARK_MAX_BRIGHTNESS:
+        if base["brightness"] < config.DARK_MAX_BRIGHTNESS:
             return {**base, "status": "too_dark"}
 
-        # Vung dau tien luon la toan anh (cell = None: khong ve), sau do la cac o phan lon la la cay
-        areas = [((0, 0, *image.size), None)]
-        areas += [(box, cell) for box, cell in tiles
-                  if color_stats(image.crop(box))[0] >= config.TILE_LEAF_MIN_RATIO]
-        if leaf_ratio < config.LEAF_MIN_RATIO and len(areas) == 1:
+        # Buoc 1: tim la. Bo la qua nho (mo, model benh khong nhin ro), giu toi da MAX_LEAVES la chac chan nhat
+        found = self.detector.detect(image, config.DET_CONF)
+        leaves = [(box, score) for box, score in found
+                  if min(box[2] - box[0], box[3] - box[1]) >= config.LEAF_MIN_SIDE][:config.MAX_LEAVES]
+        base["n_found"] = len(found)
+        if not leaves:
             return {**base, "status": "no_leaf"}
 
-        probs = self._classify([image.crop(box) for box, _ in areas])
+        # Buoc 2: cham diem tung la
+        probs = self._classify([image.crop(leaf_crop_box(box, image.size)) for box, _ in leaves])
         disease_probs = 1 - probs[:, self.healthy_idx].sum(dim=1)  # P(benh) = 1 - tong P(cac lop khoe)
+        p_disease_only = probs.clone()
+        p_disease_only[:, self.healthy_idx] = 0  # Chi xet cac lop benh de biet "neu benh thi la benh gi"
 
         regions = []
-        for (box, cell), p, d in zip(areas, probs, disease_probs):
-            p_disease = p.clone()
-            p_disease[self.healthy_idx] = 0  # Chi xet cac lop benh de biet "neu benh thi la benh gi"
-            k = int(p_disease.argmax())
-            regions.append({"box": box, "cell": cell, "disease_prob": float(d), "level": disease_level(float(d)),
+        for (box, score), p, d in zip(leaves, p_disease_only, disease_probs):
+            k = int(p.argmax())
+            regions.append({"box": box, "score": score, "disease_prob": float(d), "level": disease_level(float(d)),
                             "disease_class": self.class_names[k], "disease_class_prob": float(p[k])})
 
-        worst = max(regions, key=lambda r: r["disease_prob"])
+        # Buoc 3: bo phieu
+        level, disease_prob = vote(disease_probs.tolist())
+        # Benh gi: trung binh xac suat cac lop benh cua nhung la bi nghi (khong co la nao bi nghi thi lay ca anh)
+        voters = [i for i, d in enumerate(disease_probs.tolist()) if d >= config.SUSPECT_THRESHOLD] \
+            or list(range(len(leaves)))
+        p_vote = p_disease_only[voters].mean(dim=0)
+        k = int(p_vote.argmax())
+        # Cay gi (khi khoe): lop "khoe" co trung binh xac suat cao nhat tren moi la
+        h = self.healthy_idx[int(probs[:, self.healthy_idx].mean(dim=0).argmax())]
         return {**base, "status": "ok", "regions": regions,
-                "level": worst["level"],  # "healthy" / "suspect" / "diseased"
-                "is_diseased": worst["level"] == "diseased",
-                "disease_prob": worst["disease_prob"],
-                "disease_class": worst["disease_class"],
-                "disease_class_prob": worst["disease_class_prob"]}
-
-
-def disease_level(prob: float) -> str:
-    """Xep muc theo xac suat benh: duoi SUSPECT_THRESHOLD la khoe, tu DISEASE_THRESHOLD la benh, o giua la nghi."""
-    if prob >= config.DISEASE_THRESHOLD:
-        return "diseased"
-    if prob >= config.SUSPECT_THRESHOLD:
-        return "suspect"
-    return "healthy"
+                "level": level,  # "healthy" / "suspect" / "diseased"
+                "is_diseased": level == "diseased",
+                "disease_prob": disease_prob,
+                "disease_class": self.class_names[k],
+                "disease_class_prob": float(p_vote[k]),
+                "healthy_class": self.class_names[h]}
 
 
 def lcd_text(result: dict) -> str:
@@ -137,18 +137,20 @@ def lcd_text(result: dict) -> str:
 def describe(result: dict) -> str:
     """Mo ta ket qua bang vai dong chu de in ra man hinh."""
     w, h = result["size"]
-    leaf_tiles = len(result["regions"]) - 1 if result["regions"] else 0
-    lines = [f"Anh {w}x{h}, do sang {result['brightness']:.0f}/255, "
-             f"{result['leaf_ratio']:.0%} dien tich mau la, {leaf_tiles}/{result['n_tiles']} o co la"]
+    regions = result["regions"]
+    n_sick = sum(r["level"] != "healthy" for r in regions)
+    lines = [(f"Anh {w}x{h}, do sang {result['brightness']:.0f}/255, tim thay {result['n_found']} la, "
+              f"cham diem {len(regions)} la ({n_sick} la nghi/benh)")]
     if result["status"] == "too_dark":
         lines.append("Ket qua: anh qua toi, khong phan tich")
     elif result["status"] == "no_leaf":
-        lines.append("Ket qua: khong thay la cay trong anh (camera lech huong?)")
+        lines.append("Ket qua: khong thay la cay trong anh (camera lech huong? la qua nho?)")
     else:
         verdict = {"diseased": "CO DAU HIEU BENH", "suspect": "NGHI NGO, nen ra xem cay",
                    "healthy": "Khoe manh"}[result["level"]]
         lines.append(f"Ket qua: {verdict} - xac suat benh {int(result['disease_prob'] * 100)}% "
-                     f"(nghi tu {config.SUSPECT_THRESHOLD:.0%}, benh tu {config.DISEASE_THRESHOLD:.0%})")
+                     f"(nghi tu {config.SUSPECT_THRESHOLD:.0%}, benh tu {config.DISEASE_THRESHOLD:.0%}, "
+                     f"can {config.MIN_VOTES} la)")
         name = config.CLASS_INFO.get(result["disease_class"], ("", result["disease_class"]))[1]
         lines.append(f"Neu benh, kha nang nhat: {name} [{result['disease_class']}] "
                      f"{result['disease_class_prob']:.0%}")
@@ -159,19 +161,17 @@ LEVEL_COLORS = {"diseased": (230, 40, 40), "suspect": (255, 160, 0), "healthy": 
 
 
 def annotate(image: Image.Image, result: dict) -> Image.Image:
-    """Ve o luoi da phan tich len anh: do = benh, cam = nghi ngo, xanh = khoe. O khong ve = it la, bo qua."""
+    """Ve khung tung la da phan tich len anh: do = benh, cam = nghi ngo, xanh = khoe."""
     image = ImageOps.exif_transpose(image).convert("RGB")
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default(size=max(14, image.width // 45))
     line_w = max(2, image.width // 400)
     for region in result["regions"]:
-        if region["cell"] is None:  # Vung toan anh, khong ve
-            continue
         color = LEVEL_COLORS[region["level"]]
-        x0, y0, x1, y1 = region["cell"]
-        draw.rectangle((x0 + line_w, y0 + line_w, x1 - line_w, y1 - line_w), outline=color, width=line_w)
+        x0, y0, x1, y1 = region["box"]
+        draw.rectangle((x0, y0, x1, y1), outline=color, width=line_w)
         code = "OK" if region["level"] == "healthy" else config.CLASS_INFO.get(region["disease_class"], ("?",))[0]
-        draw.text((x0 + 3 * line_w, y0 + 2 * line_w), f"{region['disease_prob']:.0%} {code}", fill=color,
+        draw.text((x0 + 2 * line_w, y0 + line_w), f"{region['disease_prob']:.0%} {code}", fill=color,
                   font=font, stroke_width=3, stroke_fill=(0, 0, 0))
     draw.text((10, image.height - font.size - 14), lcd_text(result), fill=(255, 255, 255), font=font,
               stroke_width=3, stroke_fill=(0, 0, 0))
@@ -202,11 +202,12 @@ def main():
     parser.add_argument("--webcam", action="store_true", help="Chup tu webcam laptop thay vi doc file")
     parser.add_argument("--save", type=Path, help="Luu anh co ve khung vao file nay (chi khi phan tich 1 anh)")
     parser.add_argument("--model", type=Path, default=config.MODEL_PATH)
+    parser.add_argument("--detector", type=Path, default=config.DETECTOR_PATH)
     args = parser.parse_args()
     if not args.images and not args.webcam:
         parser.error("Can it nhat 1 duong dan anh, hoac --webcam")
 
-    predictor = Predictor(args.model)
+    predictor = Predictor(args.model, args.detector)
 
     if args.webcam:
         image = capture_webcam()

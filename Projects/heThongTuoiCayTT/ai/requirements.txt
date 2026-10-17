@@ -7,3 +7,6 @@ tqdm
 pyserial
 requests
 opencv-python
+onnxruntime  # predict.py chay model tim la (models/leaf_detector.onnx)
+ultralytics  # chi can khi train model tim la (train_detector.py)
+onnxslim     # train_detector.py dung de xuat ONNX gon hon
