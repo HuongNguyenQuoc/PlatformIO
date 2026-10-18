@@ -1,4 +1,4 @@
-"""Huan luyen CNN EfficientNet-B0 (transfer learning) nhan dien 15 lop benh la ca chua / ot / khoai tay.
+"""Huan luyen CNN EfficientNet-B0 (transfer learning) nhan dien 10 lop benh la ca chua.
 
 Cach chay:  python train.py                              (mac dinh: 3 epoch pha 1 + 12 epoch pha 2, ~22 phut)
             python train.py --epochs-head 1 --epochs 1   (chay thu nhanh ~3 phut)
@@ -23,7 +23,7 @@ def make_loaders(batch_size: int, workers: int):
     val_ds = datasets.ImageFolder(config.DATA_DIR / "val", transform=get_transforms(train=False))
 
     # Can bang lop: moi anh co trong so = 1 / (so anh cua lop no)
-    # -> lop it anh (Potato_healthy) duoc boc nhieu lan hon, lop nhieu anh (Tomato_Yellow_Curl) boc it hon
+    # -> lop it anh (Tomato_Mosaic) duoc boc nhieu lan hon, lop nhieu anh (Tomato_Yellow_Curl) boc it hon
     targets = torch.tensor(train_ds.targets)
     class_counts = torch.bincount(targets)
     sample_weights = 1.0 / class_counts[targets].float()
@@ -47,7 +47,7 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
         optimizer.zero_grad(set_to_none=True)
         # autocast: tinh bang float16 tren GPU -> nhanh hon, ton it VRAM hon
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
-            outputs = model(images)            # [batch, 15] diem so cho tung lop
+            outputs = model(images)            # [batch, 10] diem so cho tung lop
             loss = criterion(outputs, labels)  # Do sai lech giua du doan va nhan that
         scaler.scale(loss).backward()          # Lan truyen nguoc: tinh gradient
         scaler.step(optimizer)                 # Cap nhat trong so

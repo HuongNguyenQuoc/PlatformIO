@@ -34,7 +34,7 @@ def list_images(folder: Path) -> list[Path]:
     return sorted([f for f in folder.iterdir() if f.suffix.lower() in IMAGE_EXTS])
 
 def plantdoc_leaves() -> dict[str, list[tuple[Path, tuple, str]]]:
-    """Cac khung la PlantDoc Object Detection thuoc 15 lop: {lop: [(anh, vung cat, tap)]}.
+    """Cac khung la PlantDoc Object Detection thuoc cac lop trong config.CLASSES: {lop: [(anh, vung cat, tap)]}.
     Chua tai bo nay thi tra ve rong (van chay duoc nhu cu)."""
     leaves = {cls: [] for cls in config.CLASSES}
     if not config.PD_OD_DIR.exists():
@@ -76,8 +76,8 @@ def main():
     for split in SPLITS:
         shutil.rmtree(config.DATA_DIR / split, ignore_errors=True)
 
-    # 2. Tao du 15 thu muc lop trong MOI tap, ke ca khi rong,
-    #    de so thu tu lop (0..14) giong het nhau o moi tap
+    # 2. Tao du thu muc cho moi lop trong MOI tap, ke ca khi rong,
+    #    de so thu tu lop (0..9) giong het nhau o moi tap
     for split in SPLITS:
         for cls in config.CLASSES.keys():
             (config.DATA_DIR / split / cls).mkdir(parents=True, exist_ok=True)

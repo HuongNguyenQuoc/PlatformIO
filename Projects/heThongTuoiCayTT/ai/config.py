@@ -17,14 +17,9 @@ MODELS_DIR = AI_DIR / "models"
 CAPTURES_DIR = AI_DIR / "captures"
 LOGS_DIR = AI_DIR / "logs"
 
-# ===== 15 lop =====
+# ===== 10 lop: chi la ca chua (bo ot, khoai tay tu 18/10/2026) =====
 # Ten lop chuan -> (thu muc trong PlantVillage, thu muc trong PlantDoc hoac None neu PlantDoc khong co)
 CLASSES = {
-    "Pepper_Bacterial_spot": ("Pepper,_bell___Bacterial_spot", "Bell_pepper leaf spot"),
-    "Pepper_healthy":        ("Pepper,_bell___healthy", "Bell_pepper leaf"),
-    "Potato_Early_blight":   ("Potato___Early_blight", "Potato leaf early blight"),
-    "Potato_Late_blight":    ("Potato___Late_blight", "Potato leaf late blight"),
-    "Potato_healthy":        ("Potato___healthy", "Potato leaf"),  # Chi ban Object Detection co (11 la)
     "Tomato_Bacterial_spot": ("Tomato___Bacterial_spot", "Tomato leaf bacterial spot"),
     "Tomato_Early_blight":   ("Tomato___Early_blight", "Tomato Early blight leaf"),
     "Tomato_Late_blight":    ("Tomato___Late_blight", "Tomato leaf late blight"),
@@ -39,11 +34,6 @@ CLASSES = {
 
 # Ma 3 ky tu (hien tren LCD) va ten tieng Viet cua tung lop
 CLASS_INFO = {
-    "Pepper_Bacterial_spot": ("PBS", "Ot - dom vi khuan"),
-    "Pepper_healthy":        ("---", "Ot - khoe"),
-    "Potato_Early_blight":   ("PEB", "Khoai tay - dom vong (benh som)"),
-    "Potato_Late_blight":    ("PLB", "Khoai tay - moc suong (benh muon)"),
-    "Potato_healthy":        ("---", "Khoai tay - khoe"),
     "Tomato_Bacterial_spot": ("TBS", "Ca chua - dom vi khuan"),
     "Tomato_Early_blight":   ("TEB", "Ca chua - dom vong (benh som)"),
     "Tomato_Late_blight":    ("TLB", "Ca chua - moc suong (benh muon)"),
@@ -67,11 +57,11 @@ MAX_SIZE = 512 # kich thuoc toi da cua anh dau vao cho model
 MODEL_PATH = MODELS_DIR / "best.pt"
 DETECTOR_PATH = MODELS_DIR / "leaf_detector.onnx"  # Model YOLO tim tung chiec la (train_detector.py)
 DET_IMG_SIZE = 640       # Anh dua vao model tim la: 640x640 (thu nho giu ti le, phan thua to xam)
-# Nguong chon theo test_real (anh that). Quy trinh tim la + bo phieu voi model 17/10 (python evaluate.py --scenes):
-# 86 anh benh -> 75 "Benh", 10 "Nghi", 1 "Khoe"; 16 anh khoe -> 15 "Khoe", 1 "Benh" (anh chup can 1 la, P(benh) 0.91).
+# Nguong chon theo test_real (anh that). Quy trinh 18/10 chi ca chua (python evaluate.py --scenes):
+# 61 anh benh -> 56 "Benh", 3 "Nghi", 2 "Khong thay la"; 8 anh khoe -> 4 "Khoe", 3 "Nghi", 1 "Khong thay la".
 DISEASE_THRESHOLD = 0.9  # Xac suat benh >= 90% thi bao "Benh"
 SUSPECT_THRESHOLD = 0.6  # 60-90% thi bao "Nghi" (nghi ngo, nen ra xem cay), duoi 60% la "Khoe"
-DET_CONF = 0.35          # Model tim la: khung co diem tin cay duoi muc nay thi bo
+DET_CONF = 0.25          # Model tim la: khung la ca chua co diem tin cay duoi muc nay thi bo
 LEAF_MIN_SIDE = 32       # La co canh ngan < 32 px (tren anh goc) thi bo: phong to len 224 chi con mo nhoe
 MAX_LEAVES = 12          # Chi cham diem toi da 12 la chac chan nhat (anh nhieu la van nhanh)
 MIN_VOTES = 2            # Can it nhat 2 la cung vuot nguong moi bao "Benh"; 1 la le chi bao "Nghi"

@@ -3,7 +3,7 @@
 Model benh duoc train tren anh tung chiec la, con ESP32-CAM chup ca vuon: nhieu la, qua, dat, chau...
 Neu dua ca anh (hay tung o luoi) vao model benh, qua ca chua hay dat nau cung bi doan thanh 1 benh nao do.
 Vi vay lam 2 buoc:
-  1. Model tim la (YOLO26n, detector.py) khoanh tung chiec la. Qua, dat, troi... khong phai la nen bi bo.
+  1. Model tim la (YOLO26n, detector.py) khoanh tung chiec la ca chua. Qua, dat, troi, la cay khac... bi bo.
   2. Cat tung la dua vao model benh, roi gop bang bo phieu: phai co it nhat config.MIN_VOTES la cung benh
      moi bao "Benh" (chi 1 la benh thi bao "Nghi"). Ten benh = benh duoc cac la bi nghi chon nhieu nhat.
 
@@ -144,7 +144,7 @@ def describe(result: dict) -> str:
     if result["status"] == "too_dark":
         lines.append("Ket qua: anh qua toi, khong phan tich")
     elif result["status"] == "no_leaf":
-        lines.append("Ket qua: khong thay la cay trong anh (camera lech huong? la qua nho?)")
+        lines.append("Ket qua: khong thay la ca chua trong anh (camera lech huong? la qua nho?)")
     else:
         verdict = {"diseased": "CO DAU HIEU BENH", "suspect": "NGHI NGO, nen ra xem cay",
                    "healthy": "Khoe manh"}[result["level"]]

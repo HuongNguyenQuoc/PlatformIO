@@ -1,14 +1,15 @@
-"""Train model YOLO26n tim tung chiec la trong anh (1 lop "la"), roi xuat ONNX cho predict.py va app Android.
+"""Train model YOLO26n tim tung chiec la trong anh (2 lop: 0 = la ca chua, 1 = la cay khac),
+roi xuat ONNX cho predict.py va app Android.
 
 Can chay prepare_detector_data.py truoc. Can them thu vien: pip install ultralytics (chi de train,
 predict.py va app chi can file .onnx).
 
-Cach chay:  python train_detector.py                 (mac dinh 60 epoch, ~1 gio tren RTX 2050)
+Cach chay:  python train_detector.py                 (mac dinh 60 epoch, ~35 phut tren RTX 2050)
             python train_detector.py --epochs 1      (chay thu)
             python train_detector.py --export-only   (chi xuat lai ONNX tu lan train truoc)
 
 Dau ra: models/leaf_detector.onnx (vao [1,3,640,640] RGB 0..1, ra [1,300,6] = x1,y1,x2,y2,diem,lop;
-        model YOLO26 tu loc khung trung nen khong can NMS)
+        model YOLO26 tu loc khung trung nen khong can NMS; detector.py chi lay lop 0)
 """
 import argparse
 import shutil
@@ -36,7 +37,7 @@ def main():
         data = config.DETECTOR_DATA_DIR / "leaf.yaml"
         if not data.exists():
             raise SystemExit(f"Chua co {data}, hay chay 'python prepare_detector_data.py' truoc")
-        # Bat dau tu model YOLO26n da hoc san tren COCO (80 loai vat): chi can day them "chiec la trong vuon"
+        # Bat dau tu model YOLO26n da hoc san tren COCO (80 loai vat): chi can day them "la ca chua / la cay khac"
         model = YOLO(config.MODELS_DIR / "yolo26n.pt")
         model.train(data=data, epochs=args.epochs, imgsz=config.DET_IMG_SIZE, batch=args.batch,
                     workers=args.workers, cache="disk", patience=15, seed=config.SEED,
