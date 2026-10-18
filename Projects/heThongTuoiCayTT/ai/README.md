@@ -14,7 +14,7 @@ ESP32-CAM (ngoài vườn) ──WiFi: GET /capture──▶ Laptop: ai/service.
 
 | File | Việc làm |
 |---|---|
-| `config.py` | Mọi cấu hình: đường dẫn, 15 lớp, ngưỡng bệnh, giờ chụp, cổng Serial, địa chỉ camera |
+| `config.py` | Mọi cấu hình: đường dẫn, 10 lớp lá cà chua, ngưỡng bệnh, giờ chụp, cổng Serial, địa chỉ camera |
 | `prepare_data.py` | Gom PlantVillage và PlantDoc thành `data/train`, `val`, `test_pv`, `test_real`, `test_leaf` |
 | `prepare_detector_data.py` | Chuyển PlantDoc Object Detection (khung từng lá) sang dạng YOLO: `data/detector/` |
 | `train_detector.py` | Train model tìm lá YOLO26n, xuất `models/leaf_detector.onnx` |
@@ -45,7 +45,7 @@ pip install -r requirements.txt   # thêm onnxruntime, ultralytics
 
 ```bash
 python prepare_detector_data.py   # ~1 phút, tạo data/detector/
-python train_detector.py          # ~40 phút trên RTX 2050, xuất models/leaf_detector.onnx
+python train_detector.py          # ~40 phút trên RTX 2050, xuất models/leaf_detector.onnx (2 lớp: lá cà chua / lá khác)
 python prepare_data.py            # ~3 phút
 python train.py                   # ~25 phút trên RTX 2050, lưu models/best.pt
 python evaluate.py                # chấm từng ảnh/lá trên test_pv, test_real, test_leaf
@@ -54,29 +54,32 @@ python evaluate.py --scenes       # chấm cả quy trình predict.py (tìm lá 
 
 Ảnh nào trùng với `test_real` đều bị loại khỏi dữ liệu train của cả 2 model, để điểm chấm vẫn là điểm thật.
 
-Kết quả ngày 17/10/2026 (model bệnh train thêm 3.639 lá cắt từ PlantDoc; số trong ngoặc là model cũ 07/10):
+Kết quả ngày 18/10/2026, **chỉ cà chua**: model bệnh 10 lớp, model tìm lá 2 lớp (lá cà chua / lá cây khác). Các tập test chỉ còn ảnh cà chua; số trong ngoặc là model 15 lớp ngày 17/10 chấm trên đúng các ảnh đó:
 
-| Tập | Số ảnh | Đoán đúng tên bệnh (15 lớp) | Báo "Benh" đúng (ngưỡng 90%) |
+| Tập | Số ảnh | Đoán đúng tên bệnh (10 lớp) | Báo "Benh" đúng (ngưỡng 90%) |
 |---|---|---|---|
-| `test_pv` (PlantVillage) | 2279 | 99,5% (99,7%) | phát hiện 1949/1957 ảnh bệnh, báo nhầm 0/322 ảnh khỏe |
-| `test_real` (PlantDoc, cả ảnh) | 102 | **61,8%** (58,8%) | phát hiện 75/86 ảnh bệnh, báo nhầm 0/16 ảnh khỏe |
-| `test_leaf` (từng lá cắt từ ảnh test_real) | 262 | **63,4%** (54,6%) | phát hiện 175/224 lá bệnh, báo nhầm 2/38 lá khỏe |
+| `test_pv` (PlantVillage) | 1816 | 99,5% | phát hiện 1654/1657 ảnh bệnh, báo nhầm 0/159 ảnh khỏe |
+| `test_real` (PlantDoc, cả ảnh) | 69 | **72,5%** (60,9%) | phát hiện 53/61 ảnh bệnh, báo nhầm 0/8 ảnh khỏe |
+| `test_leaf` (từng lá cắt từ ảnh test_real) | 195 | **74,4%** (64,6%) | phát hiện 144/168 lá bệnh, báo nhầm 1/27 lá khỏe |
 
-**Cả quy trình** (`python evaluate.py --scenes`: tìm lá → chấm từng lá → bỏ phiếu) trên 102 ảnh `test_real`:
+**Cả quy trình** (`python evaluate.py --scenes`: tìm lá → chấm từng lá → bỏ phiếu) trên 69 ảnh cà chua của `test_real`:
 
-| | Cách cũ: chia ô 3×3, lấy ô tệ nhất | Cách mới: tìm lá + bỏ phiếu |
-|---|---|---|
-| 86 ảnh bệnh → Bệnh / Nghi / Khỏe / Không thấy lá | 77 / 6 / 2 / 1 | 75 / 10 / 1 / 0 |
-| 16 ảnh khỏe → Bệnh / Nghi / Khỏe | 0 / 5 / 11 | 1 / 0 / **15** |
-| Đúng tên bệnh (86 ảnh bệnh) | 51 | **54** |
+| | Cách cũ: chia ô 3×3, model 07/10 | Tìm lá 1 lớp + model 10 lớp | **Đang dùng**: tìm lá 2 lớp + model 10 lớp |
+|---|---|---|---|
+| 61 ảnh bệnh → Bệnh / Nghi / Khỏe / Không thấy lá | 53 / 5 / 2 / 1 | 59 / 2 / 0 / 0 | 56 / 3 / 0 / 2 |
+| 8 ảnh khỏe → Bệnh / Nghi / Khỏe / Không thấy lá | 0 / 5 / 3 / 0 | 1 / 2 / 5 / 0 | 0 / 3 / 4 / 1 |
+| Đúng tên bệnh (61 ảnh bệnh) | 37 | 47 | 45 |
+| Lá cây khác (tập val) bị coi là lá cà chua | – | 76,9% | **4,0%** |
 
-Ảnh thử: lá khỏe + quả cà chua trước bị báo `NGHI 65%` (ô chứa quả bị chấm là mốc sương), nay là `KHOE 89%`. Ảnh ESP32-CAM chụp nhầm trần nhà trước báo `NGHI 75%`, nay là `KHONG THAY LA`.
+- Model tìm lá 2 lớp bỏ được gần hết lá cây khác: trong 299 ảnh val chỉ có cây khác, 276 ảnh ra "không thấy lá". Đổi lại, nó nhận nhầm vài lá cà chua thật thành "lá khác": 3/69 ảnh cà chua thành `KHONG THAY LA`.
+- Ảnh minh họa lá + quả cà chua ở `captures/images.jpeg` cũng bị coi là lá cây khác (90%) nên ra `KHONG THAY LA`. Với model tìm lá 1 lớp thì ảnh này ra `KHOE 74%`.
+- Muốn quay lại model tìm lá 1 lớp (không loại lá cây khác): chép `models/leaf_detector_1lop.onnx` đè lên `models/leaf_detector.onnx` (và vào `assets/` của app), đặt `DET_CONF = 0.35`.
+- Ảnh ESP32-CAM chụp nhầm trần nhà: trước báo `NGHI 75%`, nay là `KHONG THAY LA`.
 
 - Ngoài vườn, model **phân biệt khỏe hay bệnh khá tốt**, nhưng **hay nhầm giữa các bệnh trông giống nhau**.
-  - Ví dụ: đốm vi khuẩn cà chua bị nhầm thành Septoria, bệnh sớm khoai tây bị nhầm thành bệnh muộn.
+  - Ví dụ: đốm vi khuẩn bị nhầm thành Septoria, khảm lá bị nhầm thành nấm mốc lá.
   - Vì vậy, LCD chỉ báo mức Khỏe / Nghi / Bệnh. Tên bệnh (in ra màn hình và trên app) chỉ là **gợi ý**. Xem chi tiết trong `logs/evaluate.log`.
-- **Vì sao ngưỡng "Benh" đặt cao (90%):** ảnh lá khỏe ngoài vườn hay bị chấm xác suất bệnh 60–90%. Với ngưỡng 90%, các ảnh đó rơi vào mức "Nghi" thay vì "Benh". Ngưỡng được chọn dựa trên chỉ 16 ảnh khỏe, nên khi có ảnh vườn của bạn, hãy chỉnh lại.
-- Ảnh khỏe duy nhất còn bị báo "Benh" là ảnh chụp cận 1 chiếc lá (P(benh) 0,91): ảnh chỉ có 1 lá thì không có lá thứ 2 để bỏ phiếu.
+- **Vì sao ngưỡng "Benh" đặt cao (90%):** ảnh lá khỏe ngoài vườn hay bị chấm xác suất bệnh 60–90%. Với ngưỡng 90%, các ảnh đó rơi vào mức "Nghi" thay vì "Benh". Ngưỡng được chọn dựa trên rất ít ảnh khỏe (8 ảnh cà chua), nên khi có ảnh vườn của bạn, hãy chỉnh lại.
 
 > **Điểm `test_real` mới là điểm thật.** PlantVillage là ảnh một chiếc lá đặt trên nền xám, chụp trong phòng lab, nên model đạt gần 100% trên đó. Ảnh ngoài vườn khó hơn nhiều. Cách cải thiện tốt nhất là tự gom ảnh vườn của bạn (xem mục 8).
 
@@ -100,20 +103,21 @@ python predict.py --webcam                                       # chụp bằng
 | `ANH QUA TOI` | Chụp lúc trời tối |
 | `LOI CAMERA` | Laptop không lấy được ảnh từ ESP32-CAM |
 
-Chữ trên hiện ở dòng 1 của LCD trong 20 giây, dòng 2 là `Khong ro qua` vì laptop chỉ có model lá. App Android gửi đủ 2 dòng, ghi rõ tên cây, ví dụ `La ca chua: Moc suong 97%` / `Qua ca chua: Tuoi 92%`. Dòng dài hơn 16 ký tự sẽ chạy chữ.
+Chữ trên hiện ở dòng 1 của LCD trong 20 giây, dòng 2 là `Khong ro qua` vì laptop chỉ có model lá. App Android gửi đủ 2 dòng, ví dụ `La ca chua: Moc suong 97%` / `Qua ca chua: Tuoi 92%`. Dòng dài hơn 16 ký tự sẽ chạy chữ.
 
-| Mã | Bệnh | Mã | Bệnh |
+**Chỉ dùng cho cà chua** (từ 18/10/2026): model lá chỉ còn 10 lớp lá cà chua (bỏ ớt, khoai tây). Model quả của app biết 30 loại nông sản, app chỉ lấy 3 nhãn cà chua (tươi / kém tươi / thối hỏng). Nếu tổng xác suất cà chua dưới 50% thì báo `Khong thay qua ca chua`, vì nếu chỉ lọc 3 nhãn cà chua thì 34/69 ảnh chỉ có lá bị báo nhầm là có quả.
+
+| Mã | Bệnh lá cà chua | Mã | Bệnh lá cà chua |
 |---|---|---|---|
-| PBS | Ớt – đốm vi khuẩn | TLM | Cà chua – nấm mốc lá |
-| PEB | Khoai tây – đốm vòng (bệnh sớm) | TMV | Cà chua – virus khảm lá |
-| PLB | Khoai tây – mốc sương (bệnh muộn) | TSL | Cà chua – đốm lá Septoria |
-| TBS | Cà chua – đốm vi khuẩn | TSM | Cà chua – nhện đỏ |
-| TEB | Cà chua – đốm vòng (bệnh sớm) | TTS | Cà chua – đốm mục tiêu |
-| TLB | Cà chua – mốc sương (bệnh muộn) | TYC | Cà chua – virus xoăn vàng lá |
+| TBS | Đốm vi khuẩn | TMV | Virus khảm lá |
+| TEB | Đốm vòng (bệnh sớm) | TSL | Đốm lá Septoria |
+| TLB | Mốc sương (bệnh muộn) | TSM | Nhện đỏ |
+| TLM | Nấm mốc lá | TTS | Đốm mục tiêu |
+|  |  | TYC | Virus xoăn vàng lá |
 
 **Tìm lá trước, rồi bỏ phiếu.** Model bệnh chỉ học ảnh từng chiếc lá. Nếu đưa cả khung hình vào, quả cà chua, đất nâu hay thân cây cũng bị đoán thành một bệnh nào đó. Vì vậy:
 
-1. Model YOLO26n khoanh từng chiếc lá. Quả, đất, trời, chậu không phải lá nên bị bỏ. Lá quá nhỏ (cạnh dưới 32 px) cũng bị bỏ vì quá mờ. Chỉ giữ tối đa 12 lá chắc chắn nhất.
+1. Model YOLO26n khoanh từng chiếc lá và chia 2 loại: lá cà chua / lá cây khác. Chỉ lá cà chua được giữ; lá cây khác, quả, đất, trời, chậu bị bỏ. Lá quá nhỏ (cạnh dưới 32 px) cũng bị bỏ vì quá mờ. Chỉ giữ tối đa 12 lá chắc chắn nhất.
 2. Mỗi lá được cắt ra (hình vuông, rộng hơn khung 10%) và chấm điểm riêng.
 3. Bỏ phiếu: cần **ít nhất 2 lá** cùng vượt ngưỡng 90% mới báo `BENH`. Nếu chỉ 1 lá bệnh rõ thì báo `NGHI`. Ảnh chỉ có 1 lá thì lá đó tự quyết. Tên bệnh là bệnh được các lá bị nghi chọn nhiều nhất.
 
@@ -223,7 +227,7 @@ python service.py --port /dev/ttyACM0          # Nano chính hãng thường là
 | `CAPTURE_TIMES` | `["08:00", "16:00"]` | Giờ chụp mỗi ngày. Nên chụp lúc trời sáng, tránh nắng gắt buổi trưa |
 | `DISEASE_THRESHOLD` / `SUSPECT_THRESHOLD` | 0.9 / 0.6 | Ngưỡng báo "Benh" và "Nghi". Tăng lên nếu báo nhầm nhiều, giảm xuống nếu hay bỏ sót |
 | `MIN_VOTES` | 2 | Số lá phải cùng vượt ngưỡng mới báo "Benh". Tăng lên nếu báo nhầm nhiều |
-| `DET_CONF` | 0.35 | Điểm tin cậy tối thiểu của model tìm lá. Tăng lên nếu khoanh nhầm vật khác thành lá |
+| `DET_CONF` | 0.25 | Điểm tin cậy tối thiểu để một khung được coi là lá cà chua. Tăng lên nếu khoanh nhầm vật khác, giảm nếu hay báo `KHONG THAY LA` |
 | `LEAF_MIN_SIDE` / `MAX_LEAVES` | 32 / 12 | Bỏ lá nhỏ hơn 32 px; chỉ chấm tối đa 12 lá mỗi ảnh |
 | `CAMERA_URLS` | `esp32cam.local` | Có thể thêm IP dự phòng, ví dụ `"http://192.168.1.50/capture"` |
 | `CAMERA_FLASH` | False | Bật đèn flash khi chụp (trong nhà, thiếu sáng) |

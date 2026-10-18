@@ -1,4 +1,5 @@
-"""Tim tung chiec la trong anh bang model YOLO26n (file ONNX do train_detector.py xuat ra).
+"""Tim tung chiec la ca chua trong anh bang model YOLO26n (file ONNX do train_detector.py xuat ra).
+Model chia 2 lop: 0 = la ca chua, 1 = la cay khac. Chi tra ve lop 0, la cay khac bi bo.
 
 Chi can onnxruntime, khong can ultralytics. App Android (LeafDetector.kt) lam y het cac buoc o day.
 """
@@ -12,6 +13,7 @@ import config
 
 PAD_COLOR = (114, 114, 114)  # Mau to phan thua khi dua anh ve hinh vuong, giong luc ultralytics train
 CROP_PAD = 0.1  # Cat la rong hon khung 10% moi phia cho khoi mat mep la
+TOMATO_CLASS = 0  # Lop "la ca chua" cua model tim la
 
 
 def leaf_crop_box(box: tuple, size: tuple[int, int]) -> tuple[int, int, int, int]:
@@ -36,7 +38,7 @@ class LeafDetector:
         self.size = inp.shape[2]    # 640
 
     def detect(self, image: Image.Image, conf: float) -> list[tuple[tuple[int, int, int, int], float]]:
-        """Tra ve list (khung la (x0, y0, x1, y1) tren anh goc, diem tin cay 0..1), diem cao truoc."""
+        """Tra ve cac la ca chua: list (khung (x0, y0, x1, y1) tren anh goc, diem tin cay 0..1), diem cao truoc."""
         # Thu nho giu ti le cho canh dai = 640, dat vao giua o vuong 640x640 to xam (letterbox)
         w, h = image.size
         scale = min(self.size / w, self.size / h)
@@ -46,11 +48,11 @@ class LeafDetector:
         canvas.paste(image.resize((nw, nh), Image.BILINEAR), (px, py))
         x = (np.asarray(canvas, dtype=np.float32) / 255.0).transpose(2, 0, 1)[None]  # [1, 3, 640, 640] RGB
 
-        # Dau ra [1, 300, 6]: x0, y0, x1, y1 (toa do tren o 640x640), diem, lop (luon 0 = la)
+        # Dau ra [1, 300, 6]: x0, y0, x1, y1 (toa do tren o 640x640), diem, lop (0 = la ca chua, 1 = la khac)
         out = self.session.run(None, {self.input_name: x})[0][0]
         leaves = []
-        for x0, y0, x1, y1, score, _ in out:
-            if score < conf:
+        for x0, y0, x1, y1, score, cls in out:
+            if score < conf or int(cls) != TOMATO_CLASS:
                 continue
             # Doi ve toa do anh goc
             box = (max(0, round((x0 - px) / scale)), max(0, round((y0 - py) / scale)),

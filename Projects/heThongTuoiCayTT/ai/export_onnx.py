@@ -2,7 +2,7 @@
 
 Xuat ra:
     ai/models/leaf_disease_model.onnx : Model ONNX da tich hop san Softmax (tra ve xac suat 0.0 -> 1.0)
-    ai/models/labels.txt             : Danh sach 15 ten lop (moi dong 1 lop, dung thu tu index)
+    ai/models/labels.txt             : Danh sach 10 ten lop (moi dong 1 lop, dung thu tu index)
     ai/models/labels.json            : Thong tin chi tiet (ma LCD, ten tieng Viet, tinh trang benh/khoe)
 """
 import json
