@@ -12,6 +12,7 @@ Bản này khớp với firmware [`src/main.cpp`](../src/main.cpp) (Nano) và [`
 | A0 | Cảm biến độ ẩm đất (AOUT) | Cảm biến điện dung |
 | D7 | Relay bơm (IN1) | `RELAY_PIN` |
 | D6 | Relay máy phun sương (IN2 nếu dùng module 2 kênh) | `MIST_PIN` |
+| D10 | Diode 1N4007 → chân tín hiệu nút S1 của mạch phun | `MIST_BTN_PIN`, vạch diode quay về phía Nano |
 | D8 (RX) | BSS138 HV2 | Nhận từ ESP IO13 |
 | D9 (TX) | BSS138 HV1 | Gửi sang ESP IO14 |
 | 5V | Ray 5V của Nano | Khoảng 4,7 V sau diode 1N5819 |
@@ -79,9 +80,12 @@ Chân NC của relay để trống. Không lấy nguồn bơm từ chân 5V củ
 | Ray 5V-ADP (+) | Relay 2 COM | |
 | Relay 2 NO | (+) của module phun sương | Phun sương tắt khi Nano mất nguồn |
 | (−) của module phun sương | GND chung | |
+| Chân tín hiệu nút S1 (đầu không vạch của 1N4007) | Nano D10 (đầu có vạch) | Chỉ cần với mạch có nút bấm, xem bên dưới |
 
 - Module phun sương có mạch điện tử riêng nên không cần diode như quạt hay bơm.
-- **Thử trước khi lắp:** cắm module thẳng vào 5V xem nó có **tự phun ngay khi có điện** không. Loại có nút bấm (có điện vẫn tắt, phải bấm mới phun) thì relay không bật được.
+- **Thử trước khi lắp:** cắm module thẳng vào 5V xem nó có **tự phun ngay khi có điện** không.
+- **Mạch có nút bấm JY-M36A0** (2–4 tấm phim, cổng Type-C): có điện vẫn TẮT, phải bấm S1 mới phun (S2 là chế độ phun lần lượt J1→J4, không dùng). Hàn đầu không vạch của 1N4007 vào chân tín hiệu của S1: chân đo được khoảng 5 V so với GND lúc thả nút, 2 chân còn lại là GND. Mỗi lần phun, firmware đóng relay 2, đợi 0,5 giây rồi kéo D10 xuống 0,2 giây (giống bấm S1), hết giờ thì ngắt relay để mạch về TẮT. Thử tay trước khi cắm vào Nano: chạm đầu có vạch vào GND nửa giây thì mạch phải bật.
+- 2 tấm phim kéo khoảng 0,7 A. Đi dây riêng từ cọc ra của bộ hạ áp tới relay, không qua ray breadboard, để ESP32-CAM không bị sụt áp.
 - Module lấy điện từ ray 5V-ADP, nên khi chỉ cắm USB laptop thì relay 2 vẫn kêu tách nhưng không phun. Đừng để module chạy khi cốc hết nước.
 
 **Khi nào phun** (firmware tự làm, cần biết giờ thật từ ESP32-CAM hoặc laptop):

@@ -21,6 +21,13 @@ const int RELAY_ACTIVE = LOW;
 const int MIST_PIN = 6;             // Chan dieu khien relay may phun suong 5V (IN2 neu dung module relay 2 kenh)
 const int MIST_RELAY_ACTIVE = LOW;  // Kich muc LOW giong relay bom
 
+// Mach phun JY-M36A0 khong nho trang thai: moi lan duoc cap dien no o trang thai TAT, phai bam nut S1 1 lan moi phun.
+// D10 noi qua diode 1N4007 (vach ve phia Nano) toi chan tin hieu cua S1. Keo D10 xuong LOW = bam S1;
+// luc thuong D10 tha noi (INPUT), diode chan nen Nano khong bao gio day dien vao mach phun.
+const int MIST_BTN_PIN = 10;
+const unsigned long MIST_BOOT_MS = 500;   // Relay cap dien xong doi mach phun khoi dong roi moi bam
+const unsigned long MIST_PRESS_MS = 200;  // Giu nut 0,2 giay
+
 // Phun suong theo gio that (ESP32-CAM gui xuong) va che do ESP gui theo tinh trang la AI bao.
 // Chi phun ban ngay de la kip kho truoc toi: la uot qua dem lam benh nam, vi khuan lan nhanh.
 // Nhip phun tinh theo dong ho nen luon phun dung luc :00, :30 (hoac :00, :15, :30, :45).
@@ -86,6 +93,8 @@ bool resting = false;               // Dang nghi REST_MS sau 1 dot chua du am
 unsigned long restStart = 0;
 
 bool mistOn = false;                // May phun suong dang chay
+unsigned long mistOnSince = 0;      // millis() luc relay phun dong
+byte mistPress = 0;                 // Bam S1 sau khi cap dien: 0 = chua bam, 1 = dang giu nut, 2 = xong
 int mistMode = MIST_NORMAL;         // Che do phun ESP gui gan nhat ("MIST:<1-3>")
 
 // Gio that: ESP gui "TIME:hh:mm:ss" moi 60 giay, giua 2 lan Nano tu dem bang millis().
@@ -147,11 +156,17 @@ int readSoilAverage() {
 
 // Relay dong/ngat gay nhieu dien, LCD de bi lech du lieu va hien ky tu rac.
 // Cho nhieu qua roi khoi tao lai LCD; updateLcd() se ve lai toan bo noi dung ngay sau do.
+// Bom / phun dang chay van tiep tuc gay nhieu, nen trong luc do khoi tao lai LCD moi LCD_REFRESH_MS
+// de ky tu rac tu het sau toi da vai giay (man hinh chop nhe 1 lan).
+const unsigned long LCD_REFRESH_MS = 5000;
+unsigned long lastLcdReset = 0;
+
 void resetLcdAfterRelay() {
   waitListening(50);
   lcd.begin(16, 2);
   shown[0][0] = '\0';
   shown[1][0] = '\0';
+  lastLcdReset = millis();
 }
 
 void setPump(bool on) {
@@ -167,12 +182,34 @@ void setPump(bool on) {
   pumpOn = on;
 }
 
+// Bat: relay cap dien, updateMistButton() bam S1 sau MIST_BOOT_MS.
+// Tat: ngat relay, mach phun mat dien nen lan sau lai bat dau tu TAT: Nano luon biet mach dang bat hay tat.
 void setMist(bool on) {
   digitalWrite(MIST_PIN, on ? MIST_RELAY_ACTIVE : !MIST_RELAY_ACTIVE);
   if (on != mistOn) {
+    mistOnSince = millis();
+    mistPress = 0;
+    pinMode(MIST_BTN_PIN, INPUT);  // Tat giua luc dang bam thi nha nut ngay
     resetLcdAfterRelay();
   }
   mistOn = on;
+}
+
+// Goi lien tuc trong loop(): giu S1 dung MIST_PRESS_MS du control() co dung doc cam bien
+void updateMistButton(unsigned long now) {
+  if (!mistOn || mistPress == 2) {
+    return;
+  }
+  if (mistPress == 0 && now - mistOnSince >= MIST_BOOT_MS) {
+    digitalWrite(MIST_BTN_PIN, LOW);  // Dat LOW truoc khi chuyen OUTPUT de khong loe HIGH
+    pinMode(MIST_BTN_PIN, OUTPUT);
+    mistPress = 1;
+  } else if (mistPress == 1 && now - mistOnSince >= MIST_BOOT_MS + MIST_PRESS_MS) {
+    pinMode(MIST_BTN_PIN, INPUT);
+    mistPress = 2;
+    // Mach phun bat dau rung sieu am luc bam S1, sau lan reset LCD trong setMist(): reset lai lan nua
+    resetLcdAfterRelay();
+  }
 }
 
 // Giay trong ngay (0-86399) luc nay, -1 neu chua biet gio
@@ -426,6 +463,8 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(MIST_PIN, !MIST_RELAY_ACTIVE);
   pinMode(MIST_PIN, OUTPUT);
+  digitalWrite(MIST_BTN_PIN, LOW);  // INPUT khong pull-up: tha noi, khong bam S1
+  pinMode(MIST_BTN_PIN, INPUT);
 
   lcd.begin(16, 2);
   lcd.clear();
@@ -444,6 +483,12 @@ void loop() {
   if (lastControl == 0 || millis() - lastControl >= CONTROL_MS) {
     lastControl = millis();
     control();
+  }
+  updateMistButton(millis());
+  // lcd.begin() chan ~60 ms: chi lam khi ESP khong dang gui do 1 dong, giong reportSoil()
+  if ((pumpOn || mistOn) && millis() - lastLcdReset >= LCD_REFRESH_MS && espLine.len == 0 &&
+      espSerial.available() == 0) {
+    resetLcdAfterRelay();
   }
   updateLcd(millis());
 }
