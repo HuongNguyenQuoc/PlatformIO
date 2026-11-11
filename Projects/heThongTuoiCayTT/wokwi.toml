@@ -1,0 +1,9 @@
+# Cau hinh trinh mo phong Wokwi cho Raspberry Pi Pico 2 W. Huong dan: docs/wokwi.md
+[wokwi]
+version = 1
+# Build truoc bang: pio run
+firmware = ".pio/build/pico2w/firmware.uf2"
+elf = ".pio/build/pico2w/firmware.elf"
+# Mo cong Serial (USB) cua Pico mo phong ra may tinh: rfc2217://localhost:4000
+# (pio device monitor -p rfc2217://localhost:4000 -b 115200)
+rfc2217ServerPort = 4000

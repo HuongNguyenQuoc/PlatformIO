@@ -12,7 +12,3 @@ ai/models/
 ai/logs/
 __pycache__/
 *.pyc
-
-# ===== ESP32-CAM =====
-esp32cam/include/secrets.h
-esp32cam/secrets.ini

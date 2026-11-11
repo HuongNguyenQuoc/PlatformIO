@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "author": "HuongNguyenQuoc",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-pi-pico-2w", "id": "pico", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-lcd1602", "id": "lcd1", "top": -170, "left": 120, "attrs": { "pins": "i2c" } },
+    { "type": "wokwi-dht22", "id": "dht1", "top": -120, "left": -110, "attrs": { "temperature": "30", "humidity": "60" } },
+    { "type": "wokwi-photoresistor-sensor", "id": "ldr1", "top": 210, "left": 170, "attrs": { "lux": "800" } },
+    {
+      "type": "wokwi-slide-potentiometer",
+      "id": "pot1",
+      "top": 280,
+      "left": 150,
+      "attrs": { "travelLength": "30", "value": "60" }
+    },
+    { "type": "wokwi-hc-sr04", "id": "sonar1", "top": 260, "left": -330, "attrs": { "distance": "30" } },
+    { "type": "wokwi-pushbutton", "id": "btn1", "top": 170, "left": -200, "attrs": { "color": "green" } },
+    { "type": "wokwi-resistor", "id": "r1", "top": 60, "left": 160, "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "r2", "top": 90, "left": 160, "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "r3", "top": 120, "left": 160, "attrs": { "value": "220" } },
+    { "type": "wokwi-led", "id": "led1", "top": 40, "left": 250, "attrs": { "color": "blue", "label": "BOM" } },
+    { "type": "wokwi-led", "id": "led2", "top": 40, "left": 300, "attrs": { "color": "white", "label": "PHUN" } },
+    { "type": "wokwi-led", "id": "led3", "top": 40, "left": 350, "attrs": { "color": "red", "label": "CANH BAO" } }
+  ],
+  "connections": [
+    [ "lcd1:GND", "pico:GND.1", "black", [] ],
+    [ "lcd1:VCC", "pico:VBUS", "red", [] ],
+    [ "lcd1:SDA", "pico:GP4", "green", [] ],
+    [ "lcd1:SCL", "pico:GP5", "purple", [] ],
+
+    [ "dht1:VCC", "pico:3V3", "red", [] ],
+    [ "dht1:GND", "pico:GND.2", "black", [] ],
+    [ "dht1:SDA", "pico:GP15", "green", [] ],
+
+    [ "ldr1:VCC", "pico:3V3", "red", [] ],
+    [ "ldr1:GND", "pico:GND.6", "black", [] ],
+    [ "ldr1:AO", "pico:GP27", "orange", [] ],
+
+    [ "pot1:VCC", "pico:3V3", "red", [] ],
+    [ "pot1:GND", "pico:GND.6", "black", [] ],
+    [ "pot1:SIG", "pico:GP26", "orange", [] ],
+
+    [ "sonar1:VCC", "pico:VBUS", "red", [] ],
+    [ "sonar1:GND", "pico:GND.3", "black", [] ],
+    [ "sonar1:TRIG", "pico:GP10", "blue", [] ],
+    [ "sonar1:ECHO", "pico:GP11", "cyan", [] ],
+
+    [ "btn1:1.l", "pico:GP14", "green", [] ],
+    [ "btn1:2.l", "pico:GND.4", "black", [] ],
+
+    [ "pico:GP16", "r1:1", "blue", [] ],
+    [ "r1:2", "led1:A", "blue", [] ],
+    [ "led1:C", "pico:GND.5", "black", [] ],
+
+    [ "pico:GP17", "r2:1", "gray", [] ],
+    [ "r2:2", "led2:A", "gray", [] ],
+    [ "led2:C", "pico:GND.5", "black", [] ],
+
+    [ "pico:GP18", "r3:1", "red", [] ],
+    [ "r3:2", "led3:A", "red", [] ],
+    [ "led3:C", "pico:GND.5", "black", [] ]
+  ],
+  "serialMonitor": { "display": "terminal", "newline": "lf" }
+}
