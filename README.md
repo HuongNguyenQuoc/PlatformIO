@@ -1,31 +1,41 @@
-# Hệ thống tưới cây thông minh và phát hiện bệnh cây
+# Hệ thống nông nghiệp thông minh tích hợp AI
 
-Repository này chứa toàn bộ mã nguồn cho hệ thống tưới cây tự động kết hợp **Arduino Nano**, **ESP32-CAM** và mô hình AI chạy trên máy tính.
+Đề tài: **Nghiên cứu, phát triển hệ thống nông nghiệp thông minh có tích hợp AI**. Hệ thống tự tưới cây theo độ ẩm đất, phun sương theo giờ, và dùng AI phát hiện bệnh lá cà chua để điều chỉnh việc phun sương.
+
+Toàn bộ hệ thống chạy bằng **mô phỏng**, không cần mạch thật:
+
+- **Raspberry Pi Pico 2 W** (vi điều khiển có Wi-Fi) chạy trên trình mô phỏng [Wokwi](https://wokwi.com) trong VS Code, gồm cảm biến, LED (thay cho bơm và máy phun sương) và LCD.
+- **AI** chạy trên máy tính.
+- Hai bên trao đổi dữ liệu qua **MQTT**.
 
 Hệ thống có thể:
 
-- Đo độ ẩm đất bằng cảm biến analog.
-- Tự động bật/tắt máy bơm theo ngưỡng độ ẩm.
-- Hiển thị độ ẩm, trạng thái bơm và quạt trên LCD 1602.
-- Bảo vệ máy bơm khi cảm biến lỗi, hết nước hoặc bơm không làm độ ẩm tăng.
-- Điều khiển quạt thông gió dựa trên kết quả phát hiện bệnh.
-- Dùng ESP32-CAM để chụp ảnh cây qua Wi-Fi.
-- Dùng 2 mô hình trên máy tính: YOLO26n tìm từng chiếc lá trong ảnh (bỏ qua quả, đất, chậu), rồi EfficientNet-B0/PyTorch chấm bệnh từng lá và bỏ phiếu để cảnh báo cây khỏe, nghi bệnh hoặc bị bệnh.
-- Gửi kết quả AI về Arduino Nano và lưu ảnh, log kết quả theo thời gian.
+- Đo độ ẩm đất, nhiệt độ và độ ẩm không khí (DHT22), ánh sáng (quang trở), mực nước bồn (cảm biến siêu âm HC-SR04).
+- Tự tưới theo ngưỡng độ ẩm: tưới từng lần ngắn rồi chờ nước ngấm.
+- Bảo vệ bơm: khóa bơm khi bơm nhiều lần mà độ ẩm không tăng, ngừng bơm khi bồn hết nước hoặc cảm biến lỗi.
+- Phun sương theo giờ (8h–16h). Không phun khi không khí đã ẩm, và dừng phun khi AI báo lá bị bệnh nấm hoặc vi khuẩn.
+- Lấy giờ thật qua NTP. Hiển thị số liệu và kết quả AI trên LCD 1602.
+- Gửi số liệu lên máy tính qua MQTT mỗi 5 giây và nhận lệnh từ máy tính.
+- Dùng 2 mô hình AI: YOLO26n tìm từng chiếc lá trong ảnh, rồi EfficientNet-B0 (PyTorch) chấm bệnh từng lá và bỏ phiếu để báo cây khỏe, nghi bệnh hay bị bệnh.
+- Lưu ảnh đã phân tích, kết quả AI và số liệu cảm biến ra file CSV.
 
-> AI chỉ có mục đích cảnh báo sớm. Kết quả cần được kiểm tra lại bằng mắt thực tế tại vườn.
+> AI chỉ có mục đích cảnh báo sớm. Kết quả cần được kiểm tra lại bằng mắt.
 
 ## Kiến trúc hệ thống
 
 ```text
-ESP32-CAM ── Wi-Fi ──> Máy tính chạy AI ── USB Serial ──> Arduino Nano
-     │                         │                              │
-     │                         ├─ Phân tích ảnh cây            ├─ Cảm biến độ ẩm đất
-     │                         ├─ Lưu ảnh và log               ├─ Relay máy bơm
-     │                         └─ Gửi kết quả AI               ├─ Relay quạt
-     │                                                        └─ LCD 1602
-     └─ UART qua module chuyển mức BSS138 <────────────────────┘
+ Wokwi (VS Code)                                  Internet                    Máy tính
+┌────────────────────────────┐                ┌───────────────────┐       ┌──────────────────────────┐
+│ Raspberry Pi Pico 2 W       │── telemetry ──▶│                   │──────▶│ ai/service.py            │
+│  cảm biến đất, DHT22,       │   mỗi 5 giây   │ broker.hivemq.com │       │  ghi logs/sensors.csv    │
+│  ánh sáng, mực nước bồn     │                │      (MQTT)       │       │  AI phân tích ảnh mẫu    │
+│  LED bơm / phun / cảnh báo  │◀── cmd ────────│                   │◀──────│  gửi MIST: và AI:        │
+│  LCD 1602                   │  MIST:, AI:    └───────────────────┘       └──────────────────────────┘
+└────────────────────────────┘
 ```
+
+- Wi-Fi giả lập của Wokwi có Internet, nhưng chỉ kết nối ra ngoài được. Vì vậy Pico và máy tính đều kết nối ra cùng một MQTT broker công khai.
+- Không có camera thật: mỗi lần phân tích, AI lấy ngẫu nhiên một ảnh lá trong thư mục ảnh mẫu.
 
 ## Cấu trúc thư mục
 
@@ -33,55 +43,31 @@ ESP32-CAM ── Wi-Fi ──> Máy tính chạy AI ── USB Serial ──> Ar
 .
 └── Projects/
     └── heThongTuoiCayTT/
-        ├── platformio.ini       # Firmware Arduino Nano
-        ├── src/main.cpp         # Logic đo ẩm, tưới cây, LCD, relay và giao tiếp AI
-        ├── include/             # Header của firmware Nano
-        ├── esp32cam/             # Firmware ESP32-CAM
-        │   ├── platformio.ini
-        │   ├── src/
-        │   ├── include/
-        │   └── secrets.example.ini
-        ├── ai/                   # Mã nguồn huấn luyện và chạy AI
-        │   ├── service.py        # Dịch vụ chạy tự động hằng ngày
+        ├── platformio.ini        # Build firmware Pico
+        ├── wokwi.toml            # Cấu hình trình mô phỏng Wokwi
+        ├── diagram.json          # Sơ đồ mạch mô phỏng
+        ├── src/main.cpp          # Firmware Pico 2 W: cảm biến, LED, LCD, Wi-Fi, NTP, MQTT
+        ├── include/config.h      # Chân Pico 2 W, Wi-Fi, MQTT
+        ├── lib/FarmCore/         # Logic tưới và phun sương (C++ thuần, không phụ thuộc phần cứng)
+        ├── ai/                   # AI phát hiện bệnh lá
+        │   ├── service.py        # Dịch vụ: phân tích ảnh, gửi kết quả cho Pico qua MQTT, ghi log
         │   ├── predict.py        # Phân tích ảnh/webcam (tìm lá + chấm từng lá)
         │   ├── detector.py       # Chạy model tìm lá (ONNX)
         │   ├── train_detector.py # Huấn luyện model tìm lá YOLO26n
-        │   ├── train.py          # Huấn luyện mô hình
-        │   ├── evaluate.py       # Đánh giá mô hình
+        │   ├── train.py          # Huấn luyện model bệnh
+        │   ├── evaluate.py       # Đánh giá model
         │   ├── prepare_data.py   # Chuẩn bị dữ liệu
         │   ├── prepare_detector_data.py  # Chuẩn bị dữ liệu tìm lá
+        │   ├── config.py         # Cấu hình AI, thư mục ảnh mẫu, MQTT
         │   └── requirements.txt
-        ├── docs/                 # Tài liệu đấu nối và vận hành
-        └── test/                 # Test PlatformIO
+        └── docs/wokwi.md         # Hướng dẫn mô phỏng, linh kiện, logic điều khiển, kịch bản thử
 ```
 
-## Yêu cầu phần cứng
+## Cài đặt
 
-- Arduino Nano ATmega328P.
-- ESP32-CAM AI-Thinker và đế ESP32-CAM-MB.
-- Cảm biến độ ẩm đất analog.
-- Bơm nước mini và relay 5 V.
-- Quạt thông gió và relay.
-- LCD 1602.
-- Module chuyển mức logic BSS138 cho giao tiếp UART giữa Nano và ESP32-CAM.
-- Máy tính chạy Python để phân tích ảnh AI.
-- Nguồn riêng 5 V tối thiểu 2 A cho ESP32-CAM khi chạy thực tế.
-
-Chi tiết sơ đồ nối dây xem trong [`Projects/heThongTuoiCayTT/docs/`](Projects/heThongTuoiCayTT/docs/).
-
-## Cài đặt công cụ
-
-### PlatformIO
-
-Cài VS Code cùng extension **PlatformIO IDE**, hoặc cài PlatformIO CLI:
-
-```bash
-python -m pip install platformio
-```
-
-### Python AI
-
-Tạo môi trường ảo và cài thư viện:
+1. Cài VS Code với 2 extension **PlatformIO IDE** và **Wokwi Simulator**.
+2. Kích hoạt license Wokwi (miễn phí): nhấn `F1` → **Wokwi: Request a New License**.
+3. Tạo môi trường Python cho AI:
 
 ```bash
 cd Projects/heThongTuoiCayTT/ai
@@ -89,7 +75,6 @@ python -m venv .venv
 
 # Linux/macOS
 source .venv/bin/activate
-
 # Windows PowerShell
 # .venv\Scripts\Activate.ps1
 
@@ -99,96 +84,30 @@ pip install -r requirements.txt
 
 ## Chạy nhanh
 
-### 1. Nạp firmware cho Arduino Nano
-
-Thực hiện từ thư mục project PlatformIO:
+**1. Build firmware và chạy mô phỏng:**
 
 ```bash
 cd Projects/heThongTuoiCayTT
-pio run -t upload
+pio run
 ```
 
-Mở Serial Monitor ở tốc độ 9600 baud nếu cần theo dõi dữ liệu:
+Sau đó nhấn `F1` → **Wokwi: Start Simulator**. Đợi terminal Wokwi in `Da ket noi MQTT` và LCD hiện giờ.
+
+**2. Chạy AI** (từ thư mục `ai/`, đã bật venv và có model trong `ai/models/`):
 
 ```bash
-pio device monitor -b 9600
+python service.py --once          # phân tích 1 ảnh ngẫu nhiên, gửi kết quả cho Pico rồi thoát
+python service.py --interval 2    # chạy liên tục, 2 phút 1 lần (để demo)
 ```
 
-### 2. Cấu hình và nạp ESP32-CAM
+LCD mô phỏng sẽ hiện kết quả AI trong 20 giây, và chế độ phun sương đổi theo bệnh.
 
-Tạo file cấu hình bí mật từ file mẫu:
-
-```bash
-cd Projects/heThongTuoiCayTT/esp32cam
-cp secrets.example.ini secrets.ini
-```
-
-Cập nhật mật khẩu OTA trong `secrets.ini`. Thông tin Wi-Fi được cấu hình trong phần `include/` của firmware theo hướng dẫn trong thư mục `esp32cam`.
-
-Lần đầu nạp bằng USB:
-
-```bash
-cd Projects/heThongTuoiCayTT
-pio run -d esp32cam -e esp32cam -t upload
-pio device monitor -d esp32cam -e esp32cam
-```
-
-Nếu ESP32-CAM không kết nối được khi nạp, giữ nút **IO0**, bấm **RST**, sau đó thử lại.
-
-Sau khi OTA đã hoạt động, có thể nạp qua Wi-Fi:
-
-```bash
-pio run -d esp32cam -t upload
-```
-
-Mặc định ESP32-CAM cung cấp các endpoint:
-
-- `http://esp32cam.local/` — trang kiểm tra camera.
-- `http://esp32cam.local/capture` — chụp và trả về ảnh JPEG.
-- `http://esp32cam.local/status` — trạng thái Wi-Fi, camera, độ ẩm và kết quả AI.
-- `POST /result` — nhận kết quả AI từ máy tính.
-
-Nếu tên `esp32cam.local` không hoạt động, dùng địa chỉ IP hiển thị trong Serial Monitor.
-
-### 3. Chạy AI
-
-Từ thư mục `ai/`, sau khi đã bật môi trường ảo:
-
-```bash
-python service.py
-```
-
-Dịch vụ sẽ chạy liên tục, chụp ảnh theo lịch trong `config.py`, phân tích ảnh, gửi kết quả về Arduino Nano và lưu dữ liệu.
-
-Một số lệnh hữu ích:
-
-```bash
-# Chạy một lần rồi thoát
-python service.py --once
-
-# Phân tích một ảnh có sẵn
-python service.py --once --image anh_cay.jpg
-
-# Chạy không cần kết nối Arduino Nano
-python service.py --no-serial
-
-# Chỉ định IP camera khi mDNS không hoạt động
-python service.py --camera-url http://192.168.1.50/capture
-
-# Chỉ định cổng Serial của Arduino Nano
-python service.py --port /dev/ttyACM0
-```
-
-Trong lúc `service.py` đang chạy, không mở thêm Serial Monitor trên cùng cổng USB.
+Cách thao tác với mạch, các lệnh và 11 kịch bản thử (tưới, khóa bơm, hết nước, lỗi cảm biến, phun theo giờ, AI báo bệnh): xem [`docs/wokwi.md`](Projects/heThongTuoiCayTT/docs/wokwi.md).
 
 ## Huấn luyện và đánh giá mô hình AI
 
-Nếu đã có dữ liệu huấn luyện, chạy:
-
 ```bash
 cd Projects/heThongTuoiCayTT/ai
-source .venv/bin/activate
-
 python prepare_detector_data.py
 python train_detector.py
 python prepare_data.py
@@ -197,88 +116,34 @@ python evaluate.py
 python evaluate.py --scenes
 ```
 
-Model bệnh được lưu tại `models/best.pt`, model tìm lá tại `models/leaf_detector.onnx` (cách tải dữ liệu xem `ai/README.md`). Có thể thử dự đoán:
+- Model bệnh lưu tại `models/best.pt`, model tìm lá tại `models/leaf_detector.onnx`. Cách tải dữ liệu xem `ai/README.md`.
+- Thư mục ảnh mẫu mặc định cho `service.py` là `data/test_real`, do `prepare_data.py` tạo ra.
 
-```bash
-python predict.py data/test_real/Tomato_Late_blight/pd_02010.jpg
-python predict.py anh_cay.jpg --save anh_cay_ai.jpg
-python predict.py --webcam
-```
+Mô hình báo 3 mức: `KHOE` (xác suất bệnh thấp), `NGHI` (nghi ngờ, cần kiểm tra thêm), `BENH` (có dấu hiệu bệnh rõ theo ngưỡng cấu hình).
 
-Mô hình phân loại ảnh thành các mức cảnh báo chính:
+Chi tiết về dữ liệu, các lớp bệnh, ngưỡng AI, kết quả đánh giá và cách cải thiện model: xem [`ai/README.md`](Projects/heThongTuoiCayTT/ai/README.md).
 
-- `KHOE`: xác suất bệnh thấp.
-- `NGHI`: có dấu hiệu nghi ngờ, cần kiểm tra thêm.
-- `BENH`: có dấu hiệu bệnh rõ hơn theo ngưỡng cấu hình.
+## Cấu hình
 
-Chi tiết về dữ liệu, các lớp bệnh, ngưỡng AI và quy trình cải thiện model xem tại [`Projects/heThongTuoiCayTT/ai/README.md`](Projects/heThongTuoiCayTT/ai/README.md).
-
-## Cấu hình tưới cây
-
-Các tham số chính nằm trong `Projects/heThongTuoiCayTT/src/main.cpp`:
-
-- `MOISTURE_LOW`: ngưỡng bắt đầu tưới.
-- `MOISTURE_HIGH`: ngưỡng dừng tưới.
-- `airValue`, `waterValue`: giá trị hiệu chuẩn cảm biến.
-- `PUMP_FLOW_ML_PER_MIN`: lưu lượng bơm thực tế.
-- `MAX_PULSES`: số lần bơm tối đa trong một đợt.
-- `REST_MS`: thời gian nghỉ sau một đợt tưới chưa đạt độ ẩm.
-- `FAN_DISEASE_ON_MS`, `FAN_DISEASE_OFF_MS`: chu kỳ quạt khi phát hiện bệnh.
-
-Sau khi thay đổi cấu hình, nạp lại firmware Arduino:
-
-```bash
-cd Projects/heThongTuoiCayTT
-pio run -t upload
-```
-
-## Giao tiếp Serial
-
-Arduino Nano nhận kết quả AI theo định dạng:
-
-```text
-AI:BENH 97%
-```
-
-Arduino gửi trạng thái độ ẩm sang ESP32-CAM theo định dạng:
-
-```text
-SOIL:<do_am>,<raw>,<bom>,<loi_cam_bien>,<quat>
-```
-
-Ví dụ:
-
-```text
-SOIL:45,812,0,0,1
-```
-
-Có thể kiểm tra nhanh mà không cần chạy Python bằng cách mở Serial Monitor ở 9600 baud và gửi:
-
-```text
-AI:Test 123
-```
+| Muốn đổi | Sửa ở đâu |
+|---|---|
+| Ngưỡng tưới, thời gian bơm, lịch phun sương, ngưỡng độ ẩm không khí, kích thước bồn | Đầu file `src/main.cpp` |
+| Chân Pico 2 W | `include/config.h` (sửa cả `diagram.json`) |
+| MQTT broker, tiền tố topic | `include/config.h` **và** `ai/config.py` (2 nơi phải giống nhau) |
+| Ngưỡng AI, giờ phân tích, thư mục ảnh mẫu | `ai/config.py` |
 
 ## Dữ liệu và log
 
-Khi chạy AI service, các dữ liệu thường được lưu trong thư mục `ai/`:
+Khi chạy `service.py`, dữ liệu được lưu trong thư mục `ai/`:
 
-- `captures/<ngày>/`: ảnh gốc và ảnh đã vẽ vùng bệnh.
+- `captures/<ngày>/`: ảnh đã phân tích và ảnh có vẽ khung từng lá.
 - `logs/ai_results.csv`: lịch sử kết quả phân tích.
-- `logs/moisture.csv`: lịch sử độ ẩm và trạng thái thiết bị.
-- `models/best.pt`: model AI tốt nhất sau khi huấn luyện.
+- `logs/sensors.csv`: số liệu cảm biến và trạng thái bơm, phun sương, mỗi phút một dòng.
 
 ## Xử lý sự cố thường gặp
 
-- **Không mở được cổng Serial:** kiểm tra cáp USB, tên cổng và đóng Serial Monitor khác.
-- **LCD không hiện kết quả AI:** nạp lại firmware Nano và kiểm tra service có nhận phản hồi `AI OK` hay không.
-- **Không truy cập được camera:** kiểm tra Wi-Fi 2.4 GHz, dùng IP thay cho `esp32cam.local`.
-- **ESP32-CAM tự khởi động lại:** sử dụng nguồn 5 V tối thiểu 2 A, dây nguồn ngắn.
-- **AI báo bệnh sai nhiều:** cải thiện góc chụp, đưa camera gần lá hơn và điều chỉnh ngưỡng trong `ai/config.py`.
-- **Bơm bị khóa:** kiểm tra mực nước, ống dẫn, lưu lượng bơm và nhấn RESET Arduino sau khi xử lý.
-
-## Lưu ý an toàn
-
-- Không cấp trực tiếp điện áp cao cho Arduino, ESP32-CAM hoặc relay nếu chưa có mạch chuyển đổi phù hợp.
-- Tách nguồn bơm/quạt khỏi nguồn logic khi cần để giảm nhiễu và sụt áp.
-- Đảm bảo mạch điện được che chắn khỏi nước.
-- Kiểm tra relay ở trạng thái tắt trước khi lắp bơm vào hệ thống.
+- **Wokwi báo thiếu firmware:** chạy `pio run` trước khi **Start Simulator**.
+- **Terminal Wokwi không có `Da ket noi MQTT`:** kiểm tra Internet. Broker công khai đôi khi lỗi: đổi `MQTT_HOST` ở cả `include/config.h` và `ai/config.py`.
+- **LCD hiện `--:--`:** Pico chưa lấy được giờ qua NTP (cần Wi-Fi), nên chưa phun sương. Có thể gõ `TIME:hh:mm:ss` để thử.
+- **LCD không hiện kết quả AI:** xem service có in `[Pico] AI OK` không, và tiền tố topic 2 bên có giống nhau không.
+- **Bơm bị khóa (`Bom:LOI`):** bấm nút xanh lá trong mạch mô phỏng, hoặc gõ `UNLOCK`.

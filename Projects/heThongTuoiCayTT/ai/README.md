@@ -1,20 +1,22 @@
 # AI phát hiện bệnh cây – Hệ thống tưới cây TT
 
-ESP32-CAM chụp ảnh cây mỗi ngày. Laptop dùng 2 model: YOLO26n tìm từng chiếc lá, rồi CNN (EfficientNet-B0, PyTorch) chấm bệnh từng lá, rồi gửi kết quả xuống Arduino Nano. Nano hiện kết quả lên LCD 20 giây rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương), và dừng phun sương khi lá bị bệnh nấm hoặc vi khuẩn. App Android trong repo DetectDisease làm được việc tương tự laptop, gửi kết quả qua ESP32-CAM.
+Máy tính dùng 2 model để phân tích ảnh lá cà chua: YOLO26n tìm từng chiếc lá, rồi CNN (EfficientNet-B0, PyTorch) chấm bệnh từng lá. Kết quả được gửi qua MQTT cho Pico 2 W đang chạy mô phỏng trên Wokwi. Pico 2 W hiện kết quả lên LCD 20 giây, rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương). Khi lá bị bệnh nấm hoặc vi khuẩn, Pico 2 W dừng phun sương.
+
+Hệ thống chỉ chạy mô phỏng, không có camera thật. Mỗi lần phân tích, service lấy ngẫu nhiên một ảnh trong thư mục ảnh mẫu (mặc định `data/test_real`).
 
 ```text
-ESP32-CAM (ngoài vườn) ──WiFi: GET /capture──▶ Laptop: ai/service.py
-                                                 ├─ predict.py: YOLO tìm lá, CNN chấm từng lá, bỏ phiếu
-                                                 ├─ captures/<ngày>/  ảnh gốc + ảnh có khung
-                                                 ├─ logs/ai_results.csv, logs/moisture.csv
-                                                 └─ USB Serial "AI:BENH 97%\n" ──▶ Nano ──▶ LCD (20 giây)
+data/test_real/ (ảnh mẫu) ──▶ Máy tính: ai/service.py
+                                ├─ predict.py: YOLO tìm lá, CNN chấm từng lá, bỏ phiếu
+                                ├─ captures/<ngày>/  ảnh đã phân tích + ảnh có khung
+                                ├─ logs/ai_results.csv, logs/sensors.csv
+                                └─ MQTT "MIST:2", "AI:BENH 97%|Ca chua - moc suong" ──▶ Pico 2 W (Wokwi) ──▶ LCD (20 giây)
 ```
 
 ## Các file
 
 | File | Việc làm |
 |---|---|
-| `config.py` | Mọi cấu hình: đường dẫn, 10 lớp lá cà chua, ngưỡng bệnh, giờ chụp, cổng Serial, địa chỉ camera |
+| `config.py` | Mọi cấu hình: đường dẫn, 10 lớp lá cà chua, ngưỡng bệnh, giờ phân tích, thư mục ảnh mẫu, MQTT |
 | `prepare_data.py` | Gom PlantVillage và PlantDoc thành `data/train`, `val`, `test_pv`, `test_real`, `test_leaf` |
 | `prepare_detector_data.py` | Chuyển PlantDoc Object Detection (khung từng lá) sang dạng YOLO: `data/detector/` |
 | `train_detector.py` | Train model tìm lá YOLO26n, xuất `models/leaf_detector.onnx` |
@@ -23,9 +25,8 @@ ESP32-CAM (ngoài vườn) ──WiFi: GET /capture──▶ Laptop: ai/service.
 | `train.py` | Train 2 pha (đóng băng backbone, rồi fine-tune toàn bộ) và lưu `models/best.pt` |
 | `evaluate.py` | Chấm điểm trên tập test: accuracy, F1, ma trận nhầm lẫn, chỉ số khỏe/bệnh |
 | `predict.py` | Phân tích ảnh hoặc webcam: tìm lá, chấm từng lá, bỏ phiếu, vẽ khung từng lá |
-| `service.py` | Chạy liên tục: chụp theo giờ, phân tích, ghi log, gửi xuống Arduino |
-| `../src/main.cpp` | Nano: tưới, phun sương theo giờ và theo AI, nhận kết quả AI qua Serial và hiện lên LCD |
-| `../esp32cam/` | Firmware ESP32-CAM: WiFi, mDNS `esp32cam.local`, các đường dẫn `/capture` và `/status` |
+| `service.py` | Chạy liên tục: lấy ảnh mẫu theo giờ, phân tích, ghi log, gửi kết quả cho Pico 2 W qua MQTT |
+| `../src/main.cpp` | Pico 2 W (Wokwi): cảm biến, tưới, phun sương theo giờ và theo AI, LCD, MQTT. Xem `../docs/wokwi.md` |
 
 Mọi lệnh Python bên dưới đều chạy trong thư mục `ai/`, sau khi đã bật venv:
 
@@ -74,14 +75,14 @@ Kết quả ngày 18/10/2026, **chỉ cà chua**: model bệnh 10 lớp, model t
 - Model tìm lá 2 lớp bỏ được gần hết lá cây khác: trong 299 ảnh val chỉ có cây khác, 276 ảnh ra "không thấy lá". Đổi lại, nó nhận nhầm vài lá cà chua thật thành "lá khác": 3/69 ảnh cà chua thành `KHONG THAY LA`.
 - Ảnh minh họa lá + quả cà chua ở `captures/images.jpeg` cũng bị coi là lá cây khác (90%) nên ra `KHONG THAY LA`. Với model tìm lá 1 lớp thì ảnh này ra `KHOE 74%`.
 - Muốn quay lại model tìm lá 1 lớp (không loại lá cây khác): chép `models/leaf_detector_1lop.onnx` đè lên `models/leaf_detector.onnx` (và vào `assets/` của app), đặt `DET_CONF = 0.35`.
-- Ảnh ESP32-CAM chụp nhầm trần nhà: trước báo `NGHI 75%`, nay là `KHONG THAY LA`.
+- Ảnh camera chụp nhầm trần nhà: trước báo `NGHI 75%`, nay là `KHONG THAY LA`.
 
 - Ngoài vườn, model **phân biệt khỏe hay bệnh khá tốt**, nhưng **hay nhầm giữa các bệnh trông giống nhau**.
   - Ví dụ: đốm vi khuẩn bị nhầm thành Septoria, khảm lá bị nhầm thành nấm mốc lá.
   - Vì vậy, LCD chỉ báo mức Khỏe / Nghi / Bệnh. Tên bệnh (in ra màn hình và trên app) chỉ là **gợi ý**. Xem chi tiết trong `logs/evaluate.log`.
 - **Vì sao ngưỡng "Benh" đặt cao (90%):** ảnh lá khỏe ngoài vườn hay bị chấm xác suất bệnh 60–90%. Với ngưỡng 90%, các ảnh đó rơi vào mức "Nghi" thay vì "Benh". Ngưỡng được chọn dựa trên rất ít ảnh khỏe (8 ảnh cà chua), nên khi có ảnh vườn của bạn, hãy chỉnh lại.
 
-> **Điểm `test_real` mới là điểm thật.** PlantVillage là ảnh một chiếc lá đặt trên nền xám, chụp trong phòng lab, nên model đạt gần 100% trên đó. Ảnh ngoài vườn khó hơn nhiều. Cách cải thiện tốt nhất là tự gom ảnh vườn của bạn (xem mục 8).
+> **Điểm `test_real` mới là điểm thật.** PlantVillage là ảnh một chiếc lá đặt trên nền xám, chụp trong phòng lab, nên model đạt gần 100% trên đó. Ảnh ngoài vườn khó hơn nhiều. Cách cải thiện tốt nhất là tự gom ảnh vườn của bạn (xem mục 7).
 
 ## 2. Thử model
 
@@ -98,14 +99,14 @@ python predict.py --webcam                                       # chụp bằng
 |---|---|
 | `KHOE 85%` | Xác suất bệnh dưới 60%. Số hiện là mức tin cây khỏe |
 | `NGHI 75%` | 60–90%: nghi ngờ, nên ra xem cây |
-| `BENH 97%` | Từ 90% trở lên: có dấu hiệu bệnh. Tên bệnh xem trên màn hình laptop hoặc app; mã bệnh (bảng dưới) vẽ trên ảnh `_ai.jpg` |
-| `KHONG THAY LA` | Model tìm lá không thấy chiếc lá nào đủ rõ: camera lệch hướng, hoặc lá quá nhỏ/quá xa |
-| `ANH QUA TOI` | Chụp lúc trời tối |
-| `LOI CAMERA` | Laptop không lấy được ảnh từ ESP32-CAM |
+| `BENH 97%` | Từ 90% trở lên: có dấu hiệu bệnh. Tên bệnh hiện ở dòng 2 của LCD; mã bệnh (bảng dưới) vẽ trên ảnh `_ai.jpg` |
+| `KHONG THAY LA` | Model tìm lá không thấy chiếc lá nào đủ rõ: ảnh không có lá cà chua, hoặc lá quá nhỏ/quá xa |
+| `ANH QUA TOI` | Ảnh chụp lúc trời tối |
+| `LOI ANH` | Service không đọc được ảnh (thư mục ảnh mẫu trống, file hỏng) |
 
-Chữ trên hiện ở dòng 1 của LCD trong 20 giây, dòng 2 là `Khong ro qua` vì laptop chỉ có model lá. App Android gửi đủ 2 dòng, ví dụ `La ca chua: Moc suong 97%` / `Qua ca chua: Tuoi 92%`. Dòng dài hơn 16 ký tự sẽ chạy chữ.
+Chữ trên hiện ở dòng 1 của LCD trong 20 giây. Dòng 2 là tên bệnh gợi ý, ví dụ `Ca chua - moc suong (benh muon)` hoặc `Nghi: Ca chua - nhen do`, hay `La ca chua khoe`. Dòng dài hơn 16 ký tự sẽ chạy chữ.
 
-**Chỉ dùng cho cà chua** (từ 18/10/2026): model lá chỉ còn 10 lớp lá cà chua (bỏ ớt, khoai tây). Model quả của app biết 30 loại nông sản, app chỉ lấy 3 nhãn cà chua (tươi / kém tươi / thối hỏng). Nếu tổng xác suất cà chua dưới 50% thì báo `Khong thay qua ca chua`, vì nếu chỉ lọc 3 nhãn cà chua thì 34/69 ảnh chỉ có lá bị báo nhầm là có quả.
+**Chỉ dùng cho cà chua** (từ 18/10/2026): model lá chỉ còn 10 lớp lá cà chua (bỏ ớt, khoai tây).
 
 | Mã | Bệnh lá cà chua | Mã | Bệnh lá cà chua |
 |---|---|---|---|
@@ -123,134 +124,70 @@ Chữ trên hiện ở dòng 1 của LCD trong 20 giây, dòng 2 là `Khong ro q
 
 Ảnh `*_ai.jpg` vẽ khung đỏ cho lá bệnh, cam cho lá nghi ngờ, xanh cho lá khỏe.
 
-## 3. Arduino Nano
+## 3. Pico 2 W mô phỏng trên Wokwi
 
-Nạp firmware mới (chạy ở thư mục gốc `heThongTuoiCayTT`):
+Firmware Pico 2 W nằm ở `../src/main.cpp` và `../lib/FarmCore/`. Cách chạy mô phỏng, linh kiện, LCD, logic tưới và phun sương, các lệnh MQTT: xem [`../docs/wokwi.md`](../docs/wokwi.md).
 
-```bash
-pio run -t upload
-```
+Chế độ phun sương theo kết quả AI do hàm `mist_mode()` trong `service.py` quyết định, rồi gửi cho Pico 2 W bằng lệnh `MIST:<1-3>`:
 
-Nano vẫn tưới như cũ. Phần mới:
+| Kết quả AI | Lệnh | Phun sương |
+|---|---|---|
+| Lá khỏe | `MIST:1` | Bình thường: 30 giây, 30 phút một lần, 8h–16h |
+| Nghi bệnh, hoặc bệnh nấm / vi khuẩn | `MIST:2` | Dừng: lá ướt làm bệnh lan nhanh |
+| Nhện đỏ (≥ 90%) | `MIST:3` | Phun tăng: 15 phút một lần (nhện đỏ sợ ẩm) |
+| Virus khảm lá, xoăn vàng lá | `MIST:1` | Bình thường |
+| Ảnh tối, không thấy lá, lỗi ảnh | (không gửi) | Giữ chế độ đang chạy |
 
-**Màn hình chính** (lúc bật nguồn, và sau khi hết 20 giây hiện kết quả AI):
+## 4. Chạy dịch vụ
 
-```text
-Do am: 45% 14:05      độ ẩm đất + giờ (--:-- khi chưa biết giờ); cảm biến lỗi thì cả dòng là LOI CAM BIEN DAT
-Bom:CHO Phun:OFF      bơm: ON / OFF / CHO (chờ nước ngấm) / LOI (bơm bị khóa, bấm RESET); phun sương: ON / OFF
-```
-
-**Kết quả AI** hiện 20 giây mỗi lần có ảnh mới phân tích xong: dòng 1 là lá, dòng 2 là quả. Dòng dài hơn 16 ký tự thì chạy chữ.
-
-**Phun sương** (relay ở chân D6), chỉ phun khi đã biết giờ:
-
-- Lá khỏe: 30 giây, 30 phút 1 lần (đúng :00 và :30), chỉ từ 8h đến trước 16h.
-- Lá bệnh nấm / vi khuẩn, hoặc nghi bệnh: dừng hẳn, đến khi AI báo lá khỏe lại (lá ướt làm bệnh lan nhanh).
-- Nhện đỏ (≥ 90%): 30 giây, 15 phút 1 lần (nhện đỏ sợ ẩm). Virus khảm / xoăn lá: phun bình thường.
-- Đổi thời gian ở các hằng `MIST_*` trong `../src/main.cpp`.
-
-Nano nhận lệnh từ 2 nguồn: cáp USB (laptop) và chân D8 (ESP32-CAM):
-
-| Lệnh | Việc làm |
-|---|---|
-| `AI:<dòng lá>\|<dòng quả>` | Kết quả mới, hiện 20 giây. Nano trả lời `AI OK`. Không có `\|` thì dòng 2 là `Khong ro qua`. `AI:` để trống thì thôi hiện |
-| `MIST:<1-3>` | Chế độ phun sương: 1 bình thường, 2 dừng, 3 phun tăng |
-| `TIME:hh:mm:ss` | Giờ thật. Nano tự đếm tiếp giữa 2 lần nhận |
-
-Mỗi 5 giây Nano gửi `SOIL:<độ ẩm %>,<raw>,<bơm 0/1>,<lỗi cảm biến 0/1>,<phun sương 0/1>` sang ESP32-CAM qua chân D9, để app xem qua `/status`.
-
-**Test không cần Python:** mở Serial Monitor (9600 baud, chọn kết thúc dòng là *Newline*), gõ lần lượt:
-
-1. `TIME:08:29:50`: dòng 1 hiện `08:29`. Khoảng 10 giây sau là 08:30, dòng 2 thành `Phun:ON` trong 30 giây.
-2. `AI:La ca chua: Moc suong 97%|Qua ca chua: Tuoi 92%`: LCD hiện kết quả 20 giây, dòng 1 chạy chữ.
-3. `MIST:2`: dừng phun. `MIST:1`: phun lại bình thường.
-
-## 4. ESP32-CAM
-
-1. Mở `../esp32cam/include/secrets.h` và điền tên, mật khẩu WiFi nhà, cùng `AP_PASSWORD` (8–63 ký tự) cho WiFi riêng `TuoiCay-CAM`. ESP32 **chỉ bắt được WiFi 2.4 GHz**. Copy `../esp32cam/secrets.example.ini` thành `secrets.ini` rồi đặt mật khẩu nạp code qua WiFi. Cả 2 file đã nằm trong `.gitignore`.
-2. Cắm ESP32-CAM lên đế **ESP32-CAM-MB**, cắm USB vào laptop rồi nạp code qua cáp:
-   ```bash
-   cd ~/Documents/PlatformIO/Projects/heThongTuoiCayTT
-   pio run -d esp32cam -e esp32cam -t upload
-   pio device monitor -d esp32cam -e esp32cam     # xem log, ghi lại địa chỉ IP
-   ```
-   Nếu báo lỗi `Failed to connect`, giữ nút IO0 trên đế MB, bấm RST, rồi nạp lại.
-   Từ lần sau có thể nạp qua WiFi bằng `pio run -d esp32cam -t upload` (xem `docs/wiring.md`, mục 6).
-3. Trên trình duyệt, mở `http://esp32cam.local/`. Trang sẽ hiện ảnh chụp thử.
-   - Nếu không mở được, dùng địa chỉ IP đã ghi lại ở bước 2, ví dụ `http://192.168.1.50/`.
-   - Nên đặt IP cố định cho ESP32-CAM trong trang quản lý router (DHCP reservation).
-4. Khi chạy thật, cấp **nguồn 5V ≥ 2A riêng** cho ESP32-CAM. Đặt camera **cách lá khoảng 30–60 cm**: lá phải chiếm phần lớn khung hình thì AI mới soi được vết bệnh.
-
-Các đường dẫn ESP32-CAM cung cấp:
-
-| Đường dẫn | Trả về |
-|---|---|
-| `/capture` | Ảnh JPEG 1600×1200 |
-| `/capture?flash=1` | Ảnh JPEG, có bật đèn flash lúc chụp |
-| `/status` | JSON gồm uptime, `time` (giờ ESP, `null` khi chưa biết giờ), `wifi_ok`/`ip`/`rssi`/`bssid` của WiFi nhà, `ap_ip`/`ap_clients` của WiFi `TuoiCay-CAM`, heap, `leaf`/`fruit`/`mist_mode` (kết quả AI gần nhất) và `soil` (độ ẩm, bơm, phun sương do Nano gửi lên, `null` nếu chưa nhận được) |
-| `POST /result` | App gửi kết quả AI dạng text 4 dòng: dòng lá, dòng quả (mỗi dòng tối đa 40 ký tự), chế độ phun (0 giữ nguyên, 1–3), giờ Unix của điện thoại. ESP lưu vào bộ nhớ và gửi xuống Nano 1 lần. Gửi 1 dòng (vd `BENH 99%`) vẫn được |
-| `/` | Trang xem thử |
-
-**Giờ của ESP.** Vào được WiFi có Internet thì ESP lấy giờ qua mạng (NTP, múi giờ Việt Nam). Chỉ phát `TuoiCay-CAM` (không có Internet) thì ESP lấy giờ của điện thoại ở lần app gửi kết quả đầu tiên. Mỗi 60 giây ESP gửi giờ và chế độ phun xuống Nano.
-
-**Hai mạng WiFi cùng lúc.** ESP vừa vào WiFi nhà, vừa tự phát WiFi `TuoiCay-CAM` (mật khẩu `AP_PASSWORD`, IP luôn là `192.168.4.1`), nên vẫn dùng được khi router hỏng hoặc mang đi nơi khác: điện thoại vào `TuoiCay-CAM`, bấm "Vẫn kết nối" khi Android báo không có Internet, app tự gọi `192.168.4.1`. Laptop cũng dùng được: `python service.py --camera-url http://192.168.4.1/capture`.
-
-- Khi có máy đang vào `TuoiCay-CAM`, ESP tạm ngừng dò tìm router để sóng không bị ngắt. Mất WiFi nhà quá 2 phút thì 1 phút mới thử lại 1 lần; quá 30 phút và không ai vào `TuoiCay-CAM` thì ESP khởi động lại.
-- Nếu router và bộ kích sóng phát cùng tên, ESP vào điểm mạnh nhất. Điểm nào vào được mà 10 giây không cấp IP (bộ kích sóng không chuyển dữ liệu của ESP) thì ESP bỏ qua 10 phút và vào điểm khác. Xem `bssid` trong `/status` để biết ESP đang dùng điểm nào.
-
-ESP32-CAM nói chuyện với Nano qua UART 9600 baud, đi qua module chuyển mức BSS138: IO13 (TX) → Nano D8, Nano D9 → IO14 (RX), GND chung. Thử không cần app: `curl -X POST -H "Content-Type: text/plain" --data-binary $'La ca chua: Khoe 98%\nQua ca chua: Tuoi 92%\n0' http://<IP>/result` (phải có `Content-Type: text/plain`, nếu không ESP sẽ không nhận được nội dung; số `0` ở cuối giữ nguyên chế độ phun sương).
-
-## 5. Chạy dịch vụ hằng ngày
-
-Cắm Nano vào laptop qua USB. Bật ESP32-CAM, rồi chạy:
+Bật mô phỏng Pico 2 W trên Wokwi trước (xem `../docs/wokwi.md`), rồi chạy:
 
 ```bash
-python service.py --once                       # chụp + phân tích 1 lần, gửi xuống Nano rồi thoát
+python service.py --once                       # phân tích 1 ảnh ngẫu nhiên, gửi cho Pico 2 W rồi thoát
+python service.py --interval 2                 # chạy liên tục, 2 phút 1 lần (để demo)
 python service.py                              # chạy liên tục: phân tích ngay, sau đó theo giờ trong config
-python service.py --once --image anh.jpg       # dùng ảnh có sẵn, không cần ESP32-CAM
-python service.py --no-serial                  # chưa cắm Nano
-python service.py --camera-url http://192.168.1.50/capture   # khi esp32cam.local không hoạt động
-python service.py --port /dev/ttyACM0          # Nano chính hãng thường là ttyACM0
+python service.py --once --image anh.jpg       # dùng ảnh chỉ định
+python service.py --image-dir thu_muc_anh      # lấy ảnh ngẫu nhiên từ thư mục khác (tìm cả thư mục con)
+python service.py --no-mqtt                    # chỉ phân tích, không gửi cho Pico 2 W
 ```
 
-- Service **giữ cổng Serial mở suốt**. Mỗi lần cổng được mở, Nano sẽ tự reset. Trong lúc service chạy, **không mở được Serial Monitor** của PlatformIO; service tự in lại các dòng Nano gửi lên, dạng `[Arduino] ...`.
-- Kết quả gửi xuống Nano được gửi lại mỗi 60 giây. Nhờ vậy, nếu Nano bị reset thì LCD vẫn có kết quả.
+- Service kết nối tới MQTT broker `config.MQTT_HOST`. Mỗi phút nó in một dòng số liệu Pico 2 W gửi lên, dạng `[Pico] 14:05:12  Dat 57% ...`, và in câu trả lời của Pico 2 W, ví dụ `[Pico] AI OK`.
+- Chế độ phun sương được gửi lại mỗi 60 giây. Nhờ vậy, nếu mô phỏng Pico 2 W khởi động lại thì vẫn lấy lại được chế độ.
 - Lưu trữ:
-  - `captures/<ngày>/<giờ>.jpg` là ảnh gốc, `<giờ>_ai.jpg` là ảnh có vẽ khung.
+  - `captures/<ngày>/<giờ>.jpg` là ảnh đã phân tích, `<giờ>_ai.jpg` là ảnh có vẽ khung.
   - `logs/ai_results.csv` ghi kết quả từng lần.
-  - `logs/moisture.csv` ghi độ ẩm, mỗi phút một dòng.
+  - `logs/sensors.csv` ghi số liệu cảm biến (độ ẩm đất, nhiệt độ, độ ẩm không khí, ánh sáng, mực nước, bơm, phun sương), mỗi phút một dòng.
 
-## 6. Tùy chỉnh (`config.py`)
+## 5. Tùy chỉnh (`config.py`)
 
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
-| `CAPTURE_TIMES` | `["08:00", "16:00"]` | Giờ chụp mỗi ngày. Nên chụp lúc trời sáng, tránh nắng gắt buổi trưa |
+| `CAPTURE_TIMES` | `["08:00", "16:00"]` | Giờ phân tích mỗi ngày (khi không dùng `--interval`) |
+| `SAMPLE_IMAGES_DIR` | `data/test_real` | Thư mục ảnh mẫu, mỗi lần lấy ngẫu nhiên 1 ảnh |
 | `DISEASE_THRESHOLD` / `SUSPECT_THRESHOLD` | 0.9 / 0.6 | Ngưỡng báo "Benh" và "Nghi". Tăng lên nếu báo nhầm nhiều, giảm xuống nếu hay bỏ sót |
 | `MIN_VOTES` | 2 | Số lá phải cùng vượt ngưỡng mới báo "Benh". Tăng lên nếu báo nhầm nhiều |
 | `DET_CONF` | 0.25 | Điểm tin cậy tối thiểu để một khung được coi là lá cà chua. Tăng lên nếu khoanh nhầm vật khác, giảm nếu hay báo `KHONG THAY LA` |
 | `LEAF_MIN_SIDE` / `MAX_LEAVES` | 32 / 12 | Bỏ lá nhỏ hơn 32 px; chỉ chấm tối đa 12 lá mỗi ảnh |
-| `CAMERA_URLS` | `esp32cam.local` | Có thể thêm IP dự phòng, ví dụ `"http://192.168.1.50/capture"` |
-| `CAMERA_FLASH` | False | Bật đèn flash khi chụp (trong nhà, thiếu sáng) |
-| `SERIAL_PORT` | `/dev/ttyUSB0` | Cổng Serial của Nano. Xem bằng lệnh `ls /dev/ttyUSB* /dev/ttyACM*` |
+| `MQTT_HOST` / `MQTT_PORT` | `broker.hivemq.com` / 1883 | MQTT broker. Đổi thì sửa cả `../include/config.h` rồi build lại firmware |
+| `MQTT_TOPIC_PREFIX` | `tuoicaytt/55afb0` | Tiền tố topic, phải giống `MQTT_TOPIC_PREFIX` trong `../include/config.h` |
+| `SENSOR_LOG_SECONDS` | 60 | Ghi số liệu cảm biến vào `logs/sensors.csv` tối đa 1 lần mỗi chừng này giây |
 
-## 7. Xử lý sự cố
+## 6. Xử lý sự cố
 
 | Hiện tượng | Cách xử lý |
 |---|---|
-| `Chua mo duoc cong /dev/ttyUSB0` | Kiểm tra cáp USB và tên cổng (`ls /dev/ttyUSB* /dev/ttyACM*`). Tắt Serial Monitor đang mở |
-| LCD không hiện kết quả AI | Xem service có in `[Arduino] AI OK` không. Nếu không, Nano đang chạy firmware cũ: nạp lại bằng `pio run -t upload` |
-| `LOI CAMERA` | Mở `http://esp32cam.local/capture` trên trình duyệt. Nếu không được, dùng IP với `--camera-url` |
-| ESP32-CAM khởi động lại liên tục | Thường do nguồn yếu (brownout). Dùng adapter 5V ≥ 2A và dây ngắn |
-| Ảnh bị lật ngược | Xoay camera, hoặc thêm `s->set_vflip(s, 1)` vào `initCamera()` |
-| Báo bệnh nhầm nhiều | Đặt camera gần lá hơn, tăng `MIN_VOTES` hoặc `DISEASE_THRESHOLD`, và xem ảnh `*_ai.jpg` để biết lá nào bị chấm nhầm |
-| Báo `KHONG THAY LA` dù có lá | Đặt camera gần hơn (lá phải to hơn 32 px trên ảnh), hoặc giảm `DET_CONF` |
-| VS Code báo `Import "torch" could not be resolved` | Bấm `Ctrl+Shift+P` → *Python: Select Interpreter* → chọn `ai/.venv/bin/python` |
+| `Chua ket noi duoc MQTT` | Kiểm tra Internet. Broker công khai đôi khi chậm hoặc lỗi: đổi `MQTT_HOST` (ví dụ `test.mosquitto.org`) ở cả `config.py` và `../include/config.h`, rồi build lại firmware |
+| LCD không hiện kết quả AI | Xem service có in `[Pico] AI OK` không. Nếu không: terminal Wokwi phải có dòng `Da ket noi MQTT`, và tiền tố topic 2 bên phải giống nhau |
+| `Khong co anh nao trong ...test_real` | Chạy `prepare_data.py` để tạo thư mục ảnh mẫu, hoặc dùng `--image` / `--image-dir` |
+| Báo bệnh nhầm nhiều | Tăng `MIN_VOTES` hoặc `DISEASE_THRESHOLD`, và xem ảnh `*_ai.jpg` để biết lá nào bị chấm nhầm |
+| Báo `KHONG THAY LA` dù có lá | Lá phải to hơn 32 px trên ảnh. Dùng ảnh chụp gần hơn, hoặc giảm `DET_CONF` |
+| VS Code báo `Import "torch" could not be resolved` | Bấm `Ctrl+Shift+P` → *Python: Select Interpreter* → chọn Python trong `ai/.venv` |
 
-## 8. Cải thiện độ chính xác cho vườn của bạn
+## 7. Cải thiện độ chính xác
 
-Model chỉ được học từ ảnh trên mạng. Muốn chính xác với vườn của bạn thì cần thêm ảnh của chính vườn đó:
+Model chỉ được học từ ảnh trên mạng. Muốn chính xác hơn với một vườn cụ thể thì cần thêm ảnh của chính vườn đó:
 
-1. Để service chạy vài tuần, ảnh sẽ được gom trong `captures/`.
+1. Chụp ảnh lá cà chua của vườn (ví dụ bằng điện thoại).
 2. Cắt riêng phần lá trong ảnh rồi phân loại theo lớp (khỏe, hoặc từng loại bệnh).
 3. Chép vào `data/raw/own/<tên lớp>/`, với tên lớp đúng như trong `config.CLASSES`, ví dụ `data/raw/own/Tomato_healthy/`.
    - `prepare_data.py` tự lấy 70% số ảnh này vào tập train và 30% vào tập `test_real`.
