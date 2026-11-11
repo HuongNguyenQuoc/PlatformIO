@@ -1,31 +1,31 @@
-"""Dich vu chay lien tuc tren laptop: chup anh tu ESP32-CAM theo gio, AI phan tich, gui ket qua xuong Arduino.
+"""Dich vu chay tren may tinh: lay anh cay, AI phan tich, gui ket qua cho Pico (mo phong Wokwi) qua MQTT.
 
-Cach chay:
+He thong chi chay mo phong nen khong co camera that: moi lan kiem tra lay ngau nhien 1 anh trong thu muc
+anh mau (config.SAMPLE_IMAGES_DIR, mac dinh data/test_real), hoac anh chi dinh bang --image.
+
+Cach chay (Pico dang chay tren Wokwi, xem docs/wokwi.md):
     python service.py                          Chay lien tuc: phan tich ngay khi bat, sau do theo config.CAPTURE_TIMES
-    python service.py --once                   Chup + phan tich 1 lan, gui xuong Arduino roi thoat
-    python service.py --once --image anh.jpg   Dung anh co san thay vi chup tu ESP32-CAM
-    python service.py --camera-url http://192.168.1.50/capture   Chi dinh IP ESP32-CAM (khi esp32cam.local loi)
-    python service.py --no-serial              Khong gui xuong Arduino (khi chua cam Nano)
-    python service.py --port /dev/ttyACM0      Doi cong Serial (mac dinh config.SERIAL_PORT)
+    python service.py --interval 2             Chay lien tuc, 2 phut phan tich 1 lan (de demo)
+    python service.py --once                   Phan tich 1 anh ngau nhien, gui cho Pico roi thoat
+    python service.py --once --image anh.jpg   Dung anh chi dinh
+    python service.py --image-dir thu_muc      Lay anh ngau nhien tu thu muc khac (tim ca thu muc con)
+    python service.py --no-mqtt                Chi phan tich, khong ket noi Pico
 
 Ket qua luu tai:
-    captures/<ngay>/<gio>.jpg      anh goc        captures/<ngay>/<gio>_ai.jpg   anh co ve khung vung benh
-    logs/ai_results.csv            ket qua AI     logs/moisture.csv              do am Arduino gui len
-
-Luu y: luc service dang mo cong Serial thi khong mo duoc Serial Monitor cua PlatformIO
-(service tu in ra cac dong Arduino gui len, dang "[Arduino] ...").
+    captures/<ngay>/<gio>.jpg      anh da phan tich   captures/<ngay>/<gio>_ai.jpg   anh co ve khung tung la
+    logs/ai_results.csv            ket qua AI         logs/sensors.csv              so lieu cam bien Pico gui len
 """
 import argparse
 import csv
-import io
-import re
+import json
+import random
+import secrets
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 
-import requests
-import serial
+import paho.mqtt.client as mqtt
 from PIL import Image, UnidentifiedImageError
 
 import config
@@ -33,14 +33,15 @@ from predict import Predictor, annotate, describe, lcd_text
 
 AI_LOG = config.LOGS_DIR / "ai_results.csv"
 AI_LOG_HEADER = ["thoi_gian", "anh", "trang_thai", "xac_suat_benh", "lop_benh", "ten_benh", "lcd"]
-MOISTURE_LOG = config.LOGS_DIR / "moisture.csv"
-MOISTURE_LOG_HEADER = ["thoi_gian", "raw", "do_am", "bom", "loi_cam_bien"]
-
-# Dong Arduino in ra moi 0.5 s, vd "Raw: 812  -->  Do am: 45%  Bom: OFF" (+ "  [LOI CAM BIEN]")
-MOISTURE_RE = re.compile(r"Raw:\s*(\d+)\s*-->\s*Do am:\s*(\d+)%\s*Bom:\s*(ON|OFF)")
-# Mo cong Serial lam Nano reset: cho bootloader + man hinh chao 1.5 s cua setup() xong moi gui
-BOOT_WAIT_SECONDS = 3.5
-# Che do phun suong gui xuong Nano ("MIST:<1-3>"), khop MIST_* trong src/main.cpp. KEEP: giu che do dang chay
+SENSOR_LOG = config.LOGS_DIR / "sensors.csv"
+# Truong trong JSON Pico gui len (topic .../telemetry) -> cot trong sensors.csv
+SENSOR_FIELDS = {
+    "time": "gio_thiet_bi", "moisture": "do_am_dat", "soil_fault": "loi_cam_bien", "temperature": "nhiet_do",
+    "air_humidity": "do_am_kk", "lux": "anh_sang_lux", "tank_level": "muc_nuoc", "pump_state": "bom",
+    "mist": "phun_suong", "mist_mode": "che_do_phun",
+}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+# Che do phun suong gui xuong Pico ("MIST:<1-3>"), khop MistMode trong lib/FarmCore. KEEP: giu che do dang chay
 MIST_KEEP, MIST_NORMAL, MIST_STOP, MIST_BOOST = 0, 1, 2, 3
 
 
@@ -55,112 +56,96 @@ def append_csv(path: Path, header: list[str], row: list) -> None:
         writer.writerow(row)
 
 
-class ArduinoLink:
-    """Giu ket noi Serial voi Arduino: doc do am gui len (ghi CSV), gui ket qua AI xuong.
-    Rut cap USB ra cam lai thi tu ket noi lai."""
+class DeviceLink:
+    """Ket noi MQTT voi Pico: nhan so lieu cam bien (ghi CSV), gui lenh (AI:, MIST:) xuong.
+    Mat mang thi paho tu ket noi lai."""
 
-    def __init__(self, port: str, baud: int):
-        self.port, self.baud = port, baud
-        self.ser = None
-        self.ready_at = 0.0
-        self.lock = threading.Lock()
-        self.last_moisture_log = 0.0
-        self._connect()
-        threading.Thread(target=self._reader, daemon=True).start()
+    def __init__(self, host: str, port: int, prefix: str):
+        self.host, self.prefix = host, prefix
+        self.connected = threading.Event()
+        self.last_sensor_log = 0.0
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"tuoicaytt-ai-{secrets.token_hex(3)}")
+        self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
+        self.client.on_message = self._on_message
+        self.client.reconnect_delay_set(min_delay=1, max_delay=30)
+        print(f"Dang ket noi MQTT {host}:{port}...")
+        self.client.connect_async(host, port, keepalive=30)
+        self.client.loop_start()
 
-    def _connect(self) -> None:
+    def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
+        if reason_code.is_failure:
+            print(f"Ket noi MQTT loi: {reason_code}")
+            return
+        print(f"Da ket noi MQTT {self.host}. Topic: {self.prefix}/...")
+        client.subscribe([(f"{self.prefix}/telemetry", 0), (f"{self.prefix}/ack", 0), (f"{self.prefix}/status", 1)])
+        self.connected.set()
+
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties) -> None:
+        self.connected.clear()
+        if reason_code != 0:
+            print(f"Mat ket noi MQTT ({reason_code}), dang thu lai...")
+
+    def _on_message(self, client, userdata, msg) -> None:
+        kind = msg.topic.rsplit("/", 1)[-1]
+        payload = msg.payload.decode("utf-8", "replace")
+        if kind == "telemetry":
+            self._handle_telemetry(payload)
+        elif kind == "status":
+            print(f"[Pico] {'dang chay' if payload == 'online' else 'mat ket noi'} ({payload})")
+        else:
+            print(f"[Pico] {payload}")  # Tra loi lenh, vd "AI OK", "MIST OK 2"
+
+    def _handle_telemetry(self, payload: str) -> None:
+        """So lieu den moi 5 giay: chi in + ghi CSV moi SENSOR_LOG_SECONDS giay."""
         try:
-            # serial_for_url nhan ca duong dan /dev/ttyUSB0 lan URL test nhu "loop://"
-            self.ser = serial.serial_for_url(self.port, self.baud, timeout=1)
-            self.ready_at = time.time() + BOOT_WAIT_SECONDS
-            print(f"Da mo cong {self.port}, cho Arduino khoi dong lai...")
-        except serial.SerialException as e:
-            self.ser = None
-            print(f"Chua mo duoc cong {self.port}: {e}")
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return
+        now = time.time()
+        if now - self.last_sensor_log < config.SENSOR_LOG_SECONDS:
+            return
+        self.last_sensor_log = now
+        print(f"[Pico] {data.get('time') or '--:--:--'}  Dat {data.get('moisture')}%  "
+              f"KK {data.get('temperature')}C {data.get('air_humidity')}%  As {data.get('lux')} lx  "
+              f"Be {data.get('tank_level')}%  Bom {data.get('pump_state')}  Phun {'ON' if data.get('mist') else 'OFF'}")
+        append_csv(SENSOR_LOG, ["thoi_gian", *SENSOR_FIELDS.values()],
+                   [datetime.now().isoformat(timespec="seconds"), *(data.get(k) for k in SENSOR_FIELDS)])
 
-    def _close(self) -> None:
-        if self.ser is not None:
-            try:
-                self.ser.close()
-            except serial.SerialException:
-                pass
-        self.ser = None
+    def wait_connected(self, timeout: float) -> bool:
+        return self.connected.wait(timeout)
 
     def send(self, line: str) -> bool:
-        """Gui 1 dong lenh xuong Arduino, vd 'AI:BENH 99%', 'MIST:2', 'TIME:14:05:37'. Tra ve True neu gui duoc."""
-        with self.lock:
-            if self.ser is None:
-                return False
-            wait = self.ready_at - time.time()
-            if wait > 0:
-                time.sleep(wait)
-            try:
-                self.ser.write(f"{line}\n".encode("ascii", "replace"))
-                self.ser.flush()
-                return True
-            except (serial.SerialException, OSError) as e:
-                print(f"Loi gui Serial: {e}")
-                self._close()
-                return False
+        """Gui 1 lenh cho Pico, vd 'AI:BENH 97%|Ca chua - moc suong', 'MIST:2'. Tra ve True neu gui duoc."""
+        if not self.connected.is_set():
+            print(f"Chua ket noi MQTT, khong gui duoc: {line}")
+            return False
+        info = self.client.publish(f"{self.prefix}/cmd", line, qos=1)
+        try:
+            info.wait_for_publish(timeout=5)
+        except (RuntimeError, ValueError) as e:
+            print(f"Loi gui MQTT: {e}")
+            return False
+        return info.is_published()
 
-    def _reader(self) -> None:
-        """Chay nen: doc tung dong Arduino gui len."""
-        while True:
-            ser = self.ser
-            if ser is None:
-                time.sleep(5)
-                with self.lock:
-                    if self.ser is None:
-                        self._connect()
-                continue
-            try:
-                line = ser.readline().decode("ascii", "replace").strip()
-            except (serial.SerialException, OSError, TypeError, AttributeError):
-                print(f"Mat ket noi {self.port}, se thu lai sau 5 giay")
-                with self.lock:
-                    self._close()
-                continue
-            if line:
-                self._handle_line(line)
-
-    def _handle_line(self, line: str) -> None:
-        match = MOISTURE_RE.search(line)
-        if not match:
-            print(f"[Arduino] {line}")  # Vd "AI OK" xac nhan da nhan ket qua
-            return
-        # Dong do am den moi 0.5 s: chi in + ghi CSV moi MOISTURE_LOG_SECONDS giay
-        now = time.time()
-        if now - self.last_moisture_log < config.MOISTURE_LOG_SECONDS:
-            return
-        self.last_moisture_log = now
-        print(f"[Arduino] {line}")
-        raw, moisture, pump = match.groups()
-        append_csv(MOISTURE_LOG, MOISTURE_LOG_HEADER,
-                   [datetime.now().isoformat(timespec="seconds"), raw, moisture, pump, int("LOI CAM BIEN" in line)])
+    def close(self) -> None:
+        self.client.loop_stop()
+        self.client.disconnect()
 
 
-def capture_from_camera(urls: list[str]) -> bytes:
-    """Tai 1 anh JPEG tu ESP32-CAM. Thu lan luot tung dia chi, toi da 3 vong."""
-    params = {"flash": "1"} if config.CAMERA_FLASH else {}
-    errors = []
-    for attempt in range(3):
-        if attempt:
-            time.sleep(5)
-        for url in urls:
-            try:
-                response = requests.get(url, params=params, timeout=config.CAMERA_TIMEOUT)
-                response.raise_for_status()
-                content_type = response.headers.get("Content-Type", "")
-                if not content_type.startswith("image/"):
-                    raise ValueError(f"khong phai anh (Content-Type: {content_type})")
-                return response.content
-            except (requests.RequestException, ValueError) as e:
-                errors.append(f"{url}: {e}")
-    raise RuntimeError("Khong lay duoc anh tu ESP32-CAM:\n  " + "\n  ".join(errors[-len(urls):]))
+def pick_image(image_path: Path | None, image_dir: Path) -> Path:
+    """Anh chi dinh, hoac 1 anh ngau nhien trong image_dir (tim ca thu muc con)."""
+    if image_path:
+        return image_path
+    images = [p for p in image_dir.rglob("*") if p.suffix.lower() in IMAGE_EXTS] if image_dir.is_dir() else []
+    if not images:
+        raise FileNotFoundError(f"Khong co anh nao trong {image_dir}. Chay prepare_data.py, "
+                                "hoac chi dinh --image / --image-dir")
+    return random.choice(images)
 
 
 def mist_mode(result: dict) -> int:
-    """Che do phun suong theo tinh trang la, giong LcdMessage.mistMode() cua app Android."""
+    """Che do phun suong theo tinh trang la."""
     if result["status"] != "ok":
         return MIST_KEEP  # Anh toi, khong thay la: khong biet la ra sao
     if result["level"] == "healthy":
@@ -174,91 +159,109 @@ def mist_mode(result: dict) -> int:
     return MIST_STOP  # Nam, vi khuan: la uot lam benh lan nhanh
 
 
-def run_check(predictor: Predictor, camera_urls: list[str], image_path: Path | None = None) -> tuple[str, int]:
-    """Lay anh (camera hoac file) -> luu -> AI phan tich -> ghi log. Tra ve (chuoi hien LCD, che do phun)."""
+def lcd_detail(result: dict) -> str:
+    """Dong 2 tren LCD: ten benh goi y (khong dau, dai hon 16 ky tu thi Pico chay chu)."""
+    if result["status"] != "ok":
+        return ""
+    if result["level"] == "healthy":
+        return "La ca chua khoe"
+    name = config.CLASS_INFO.get(result["disease_class"], ("", ""))[1]
+    return name if result["level"] == "diseased" else f"Nghi: {name}"
+
+
+def run_check(predictor: Predictor, image_path: Path | None, image_dir: Path) -> tuple[str, str, int]:
+    """Lay anh -> luu -> AI phan tich -> ghi log. Tra ve (dong 1 LCD, dong 2 LCD, che do phun)."""
     now = datetime.now()
     stamp = now.isoformat(timespec="seconds")
     try:
-        data = image_path.read_bytes() if image_path else capture_from_camera(camera_urls)
-        image = Image.open(io.BytesIO(data))
+        source = pick_image(image_path, image_dir)
+        data = source.read_bytes()
+        image = Image.open(source)
         image.load()
-    except (RuntimeError, OSError, UnidentifiedImageError) as e:
+    except (OSError, UnidentifiedImageError) as e:
         print(f"\n[{now:%Y-%m-%d %H:%M:%S}] {e}")
-        append_csv(AI_LOG, AI_LOG_HEADER, [stamp, "", "camera_error", "", "", "", "LOI CAMERA"])
-        return "LOI CAMERA", MIST_KEEP
+        append_csv(AI_LOG, AI_LOG_HEADER, [stamp, "", "image_error", "", "", "", "LOI ANH"])
+        return "LOI ANH", "", MIST_KEEP
 
     day_dir = config.CAPTURES_DIR / f"{now:%Y-%m-%d}"
     day_dir.mkdir(parents=True, exist_ok=True)
-    raw_path = day_dir / f"{now:%H%M%S}{image_path.suffix.lower() if image_path else '.jpg'}"
+    raw_path = day_dir / f"{now:%H%M%S}{source.suffix.lower()}"
     raw_path.write_bytes(data)
 
     result = predictor.analyze(image)
     annotate(image, result).save(day_dir / f"{now:%H%M%S}_ai.jpg", quality=90)
-    text = lcd_text(result)
+    text, detail = lcd_text(result), lcd_detail(result)
 
-    print(f"\n[{now:%Y-%m-%d %H:%M:%S}] Anh: {raw_path}")
+    print(f"\n[{now:%Y-%m-%d %H:%M:%S}] Anh: {source}")
     print(describe(result))
-    print(f"LCD: {text}")
+    print(f"LCD: {text} | {detail}")
     name = config.CLASS_INFO.get(result["disease_class"], ("", ""))[1] if result["is_diseased"] else ""
     append_csv(AI_LOG, AI_LOG_HEADER, [stamp, raw_path, result["status"], f"{result['disease_prob']:.3f}",
                                        result["disease_class"] if result["is_diseased"] else "", name, text])
-    return text, mist_mode(result)
+    return text, detail, mist_mode(result)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Chup anh ESP32-CAM, AI phan tich, gui ket qua xuong Arduino")
-    parser.add_argument("--once", action="store_true", help="Chay 1 lan roi thoat")
-    parser.add_argument("--image", type=Path, help="Dung anh co san thay vi chup tu ESP32-CAM")
-    parser.add_argument("--camera-url", help="Dia chi chup anh, vd http://192.168.1.50/capture "
-                                             "(mac dinh: cac dia chi trong config.CAMERA_URLS)")
-    parser.add_argument("--no-serial", action="store_true", help="Khong ket noi Arduino")
-    parser.add_argument("--port", default=config.SERIAL_PORT, help="Cong Serial cua Arduino")
+    parser = argparse.ArgumentParser(description="AI phan tich anh cay, gui ket qua cho Pico mo phong qua MQTT")
+    parser.add_argument("--once", action="store_true", help="Phan tich 1 lan roi thoat")
+    parser.add_argument("--image", type=Path, help="Phan tich anh nay thay vi chon ngau nhien")
+    parser.add_argument("--image-dir", type=Path, default=config.SAMPLE_IMAGES_DIR,
+                        help=f"Thu muc lay anh ngau nhien (mac dinh {config.SAMPLE_IMAGES_DIR})")
+    parser.add_argument("--interval", type=float, metavar="PHUT",
+                        help="Phan tich moi PHUT phut thay vi theo config.CAPTURE_TIMES")
+    parser.add_argument("--no-mqtt", action="store_true", help="Khong ket noi Pico")
     args = parser.parse_args()
-    camera_urls = [args.camera_url] if args.camera_url else config.CAMERA_URLS
 
     predictor = Predictor()
-    link = None if args.no_serial else ArduinoLink(args.port, config.SERIAL_BAUD)
+    link = None if args.no_mqtt else DeviceLink(config.MQTT_HOST, config.MQTT_PORT, config.MQTT_TOPIC_PREFIX)
+    if link is not None and not link.wait_connected(15):
+        print("Chua ket noi duoc MQTT sau 15 giay, van tiep tuc va tu thu lai")
 
     mist = MIST_NORMAL  # Che do phun dang chay: chua co ket qua thi phun binh thuong
 
-    def sync() -> None:
-        """Gui che do phun + gio cua laptop. Gui lai dinh ky de Nano bi reset van lay lai duoc."""
-        if link is not None:
-            link.send(f"MIST:{mist}")
-            link.send(f"TIME:{datetime.now():%H:%M:%S}")
-
-    def publish(text: str, mode: int) -> None:
-        """Gui ket qua moi: Nano hien len LCD 20 giay. Chi gui 1 lan moi lan chup, gui lai la LCD hien lai."""
+    def publish(text: str, detail: str, mode: int) -> None:
+        """Gui che do phun + ket qua moi: Pico hien len LCD 20 giay."""
         nonlocal mist
         if mode != MIST_KEEP:
             mist = mode
-        sync()
-        if link is not None and link.send(f"AI:{text}"):
-            print(f"Da gui xuong Arduino: AI:{text}  (phun che do {mist})")
+        if link is not None and link.send(f"MIST:{mist}") and link.send(f"AI:{text}|{detail}"):
+            print(f"Da gui cho Pico: AI:{text}|{detail}  (phun che do {mist})")
 
-    if args.once:
-        publish(*run_check(predictor, camera_urls, args.image))
-        time.sleep(1.5)  # Cho Arduino tra loi "AI OK" truoc khi thoat
-        return
+    def check() -> None:
+        publish(*run_check(predictor, args.image, args.image_dir))
 
-    print(f"Service dang chay. Gio chup moi ngay: {', '.join(config.CAPTURE_TIMES)}. Nhan Ctrl+C de dung.")
-    publish(*run_check(predictor, camera_urls, args.image))
-    last_sync = time.time()
-    done_slots = set()  # Cac (ngay, gio) da chup, tranh chup 2 lan trong cung 1 phut
     try:
+        if args.once:
+            check()
+            time.sleep(2)  # Cho Pico tra loi "AI OK" truoc khi thoat
+            return
+
+        schedule = f"{args.interval:g} phut 1 lan" if args.interval else f"luc {', '.join(config.CAPTURE_TIMES)}"
+        print(f"Service dang chay, phan tich {schedule}. Nhan Ctrl+C de dung.")
+        check()
+        last_check = last_sync = time.time()
+        done_slots = set()  # Cac (ngay, gio) da phan tich, tranh lam 2 lan trong cung 1 phut
         while True:
             now = datetime.now()
             slot = now.strftime("%H:%M")
-            if slot in config.CAPTURE_TIMES and (now.date(), slot) not in done_slots:
-                done_slots.add((now.date(), slot))
-                publish(*run_check(predictor, camera_urls, args.image))
-                last_sync = time.time()
-            elif time.time() - last_sync >= config.RESEND_SECONDS:
-                sync()
+            if args.interval:
+                due = time.time() - last_check >= args.interval * 60
+            else:
+                due = slot in config.CAPTURE_TIMES and (now.date(), slot) not in done_slots
+                if due:
+                    done_slots.add((now.date(), slot))
+            if due:
+                check()
+                last_check = last_sync = time.time()
+            elif link is not None and time.time() - last_sync >= config.RESEND_SECONDS:
+                link.send(f"MIST:{mist}")  # Gui lai dinh ky: Pico khoi dong lai van lay lai che do phun
                 last_sync = time.time()
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nDa dung service.")
+    finally:
+        if link is not None:
+            link.close()
 
 
 if __name__ == "__main__":

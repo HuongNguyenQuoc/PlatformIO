@@ -67,16 +67,16 @@ MAX_LEAVES = 12          # Chi cham diem toi da 12 la chac chan nhat (anh nhieu 
 MIN_VOTES = 2            # Can it nhat 2 la cung vuot nguong moi bao "Benh"; 1 la le chi bao "Nghi"
 DARK_MAX_BRIGHTNESS = 35 # Do sang trung binh (0-255) duoi muc nay thi coi la anh qua toi (ban dem)
 
-# ===== Camera ESP32-CAM (service.py) =====
-# Thu lan luot tung dia chi. Neu may khong phan giai duoc esp32cam.local thi them IP that cua ESP32-CAM
-# (xem tren Serial Monitor cua ESP32-CAM luc khoi dong), vd "http://192.168.1.50/capture"
-CAMERA_URLS = ["http://esp32cam.local/capture"]
-CAMERA_FLASH = False      # True: bat den flash khi chup (chi nen dung khi trong nha / thieu sang)
-CAMERA_TIMEOUT = 20       # Giay cho moi lan tai anh
-CAPTURE_TIMES = ["08:00", "16:00"]  # Gio chup anh + phan tich moi ngay
+# ===== Anh dau vao (service.py) =====
+# He thong chi chay mo phong, khong co camera that: moi lan phan tich lay ngau nhien 1 anh trong thu muc nay
+# (tim ca thu muc con). test_real la anh vuon that, khong dung de train, nen ket qua giong khi chay that.
+SAMPLE_IMAGES_DIR = DATA_DIR / "test_real"
+CAPTURE_TIMES = ["08:00", "16:00"]  # Gio phan tich moi ngay (hoac chay service.py --interval <phut> de demo)
 
-# ===== Arduino Nano (service.py) =====
-SERIAL_PORT = "/dev/ttyUSB0"  # Nano clone (chip CH340) -> /dev/ttyUSB0; Nano chinh hang -> /dev/ttyACM0
-SERIAL_BAUD = 9600            # Phai trung voi Serial.begin() trong src/main.cpp
-RESEND_SECONDS = 60           # Gui lai che do phun suong + gio dinh ky, phong khi Nano bi reset
-MOISTURE_LOG_SECONDS = 60     # Ghi do am Arduino gui len vao CSV toi da 1 lan / 60 giay
+# ===== MQTT: noi voi Pico dang chay tren Wokwi (service.py) =====
+# Broker cong khai: Pico mo phong va may tinh deu ket noi ra day. Ai biet topic cung doc/ghi duoc, chi de demo.
+MQTT_HOST = "broker.hivemq.com"
+MQTT_PORT = 1883
+MQTT_TOPIC_PREFIX = "tuoicaytt/55afb0"  # Phai trung MQTT_TOPIC_PREFIX trong ../include/config.h
+RESEND_SECONDS = 60       # Gui lai che do phun suong dinh ky, phong khi Pico khoi dong lai
+SENSOR_LOG_SECONDS = 60   # Ghi so lieu cam bien Pico gui len vao CSV toi da 1 lan / 60 giay

@@ -1,6 +1,6 @@
 """Phan tich 1 anh xem cay co dau hieu benh khong.
 
-Model benh duoc train tren anh tung chiec la, con ESP32-CAM chup ca vuon: nhieu la, qua, dat, chau...
+Model benh duoc train tren anh tung chiec la, con anh chup vuon co ca: nhieu la, qua, dat, chau...
 Neu dua ca anh (hay tung o luoi) vao model benh, qua ca chua hay dat nau cung bi doan thanh 1 benh nao do.
 Vi vay lam 2 buoc:
   1. Model tim la (YOLO26n, detector.py) khoanh tung chiec la ca chua. Qua, dat, troi, la cay khac... bi bo.

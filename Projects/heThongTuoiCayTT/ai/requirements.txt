@@ -4,8 +4,7 @@ pillow
 numpy
 scikit-learn
 tqdm
-pyserial
-requests
+paho-mqtt>=2.0  # service.py noi voi Pico mo phong qua MQTT
 opencv-python
 onnxruntime  # predict.py chay model tim la (models/leaf_detector.onnx)
 ultralytics  # chi can khi train model tim la (train_detector.py)
