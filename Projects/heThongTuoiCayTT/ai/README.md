@@ -1,6 +1,6 @@
 # AI phát hiện bệnh cây – Hệ thống tưới cây TT
 
-Máy tính dùng 2 model để phân tích ảnh lá cà chua: YOLO26n tìm từng chiếc lá, rồi CNN (EfficientNet-B0, PyTorch) chấm bệnh từng lá. Kết quả được gửi qua MQTT cho Pico 2 W đang chạy mô phỏng trên Wokwi. Pico 2 W hiện kết quả lên LCD 20 giây, rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương). Khi lá bị bệnh nấm hoặc vi khuẩn, Pico 2 W dừng phun sương.
+Máy tính dùng 2 model để phân tích ảnh lá **cà chua, ớt chuông và khoai tây**: YOLO26n tìm từng chiếc lá, rồi CNN (EfficientNet-B0, PyTorch) chấm bệnh từng lá. Kết quả được gửi qua MQTT cho Pico 2 W đang chạy mô phỏng trên Wokwi. Pico 2 W hiện kết quả lên LCD 20 giây, rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương). Khi lá bị bệnh nấm hoặc vi khuẩn, Pico 2 W dừng phun sương.
 
 Hệ thống chỉ chạy mô phỏng, không có camera thật. Mỗi lần phân tích, service lấy ngẫu nhiên một ảnh trong thư mục ảnh mẫu (mặc định `data/test_real`).
 
@@ -16,7 +16,8 @@ data/test_real/ (ảnh mẫu) ──▶ Máy tính: ai/service.py
 
 | File | Việc làm |
 |---|---|
-| `config.py` | Mọi cấu hình: đường dẫn, 10 lớp lá cà chua, ngưỡng bệnh, giờ phân tích, thư mục ảnh mẫu, MQTT |
+| `config.py` | Mọi cấu hình: đường dẫn, 15 lớp lá (cà chua, ớt chuông, khoai tây), ngưỡng bệnh, giờ phân tích, thư mục ảnh mẫu, MQTT |
+| `colab_train.ipynb` | Notebook Google Colab: tải dữ liệu, train cả 2 model, chấm điểm, lưu model vào Google Drive |
 | `prepare_data.py` | Gom PlantVillage và PlantDoc thành `data/train`, `val`, `test_pv`, `test_real`, `test_leaf` |
 | `prepare_detector_data.py` | Chuyển PlantDoc Object Detection (khung từng lá) sang dạng YOLO: `data/detector/` |
 | `train_detector.py` | Train model tìm lá YOLO26n, xuất `models/leaf_detector.onnx` |
@@ -37,16 +38,26 @@ source .venv/bin/activate
 
 ## 1. Huấn luyện model (làm 1 lần)
 
-Tải dữ liệu PlantDoc Object Detection (ảnh vườn thật, mỗi chiếc lá có 1 khung, ~1.9 GB) một lần:
+**Cách khuyên dùng: Google Colab.** Mở [`colab_train.ipynb`](colab_train.ipynb) trên Colab (**File → Open notebook → GitHub**, nhập `HuongNguyenQuoc/PlatformIO`). Chọn **Runtime → Change runtime type → GPU**, rồi chạy lần lượt từng ô. Notebook tải dữ liệu, train cả 2 model, chấm điểm, rồi lưu `best.pt`, `leaf_detector.onnx`, các file log và `test_real.zip` vào Google Drive (`MyDrive/tuoicay_ai`). Ô cuối của notebook hướng dẫn chép các file này về máy.
+
+Muốn train trên máy mình (cần GPU NVIDIA), tải 3 bộ dữ liệu một lần (tổng ~3 GB):
 
 ```bash
+# PlantVillage (ảnh lab): chỉ lấy thư mục cà chua, ớt chuông, khoai tây
+git clone --filter=blob:none --no-checkout --depth 1 https://github.com/spMohanty/PlantVillage-Dataset.git data/raw/plantvillage
+git -C data/raw/plantvillage sparse-checkout set --no-cone '/raw/color/Tomato___*/' '/raw/color/Pepper,_bell___*/' '/raw/color/Potato___*/'
+git -C data/raw/plantvillage checkout
+# PlantDoc (ảnh vườn thật) và PlantDoc Object Detection (ảnh vườn thật, mỗi chiếc lá có 1 khung)
+git clone --depth 1 https://github.com/pratikkayal/PlantDoc-Dataset.git data/raw/plantdoc
 git clone --depth 1 https://github.com/pratikkayal/PlantDoc-Object-Detection-Dataset.git data/raw/plantdoc_od/repo
 pip install -r requirements.txt   # thêm onnxruntime, ultralytics
 ```
 
+> Trên Windows, 2 bộ PlantDoc có vài trăm file tên chứa dấu `?`, nên Git không giải nén được (`invalid path`). Đây là một lý do nên train trên Colab (Linux).
+
 ```bash
 python prepare_detector_data.py   # ~1 phút, tạo data/detector/
-python train_detector.py          # ~40 phút trên RTX 2050, xuất models/leaf_detector.onnx (2 lớp: lá cà chua / lá khác)
+python train_detector.py          # ~40 phút trên RTX 2050, xuất models/leaf_detector.onnx (2 lớp: lá cây trồng / lá khác)
 python prepare_data.py            # ~3 phút
 python train.py                   # ~25 phút trên RTX 2050, lưu models/best.pt
 python evaluate.py                # chấm từng ảnh/lá trên test_pv, test_real, test_leaf
@@ -54,6 +65,8 @@ python evaluate.py --scenes       # chấm cả quy trình predict.py (tìm lá 
 ```
 
 Ảnh nào trùng với `test_real` đều bị loại khỏi dữ liệu train của cả 2 model, để điểm chấm vẫn là điểm thật.
+
+> **Model hiện tại có 15 lớp (từ 17/11/2026) và chưa được chấm điểm.** Các bảng dưới đây là kết quả của model cũ chỉ có cà chua. Sau khi chạy notebook, chép bảng điểm trong `evaluate.log` và `evaluate_scenes.log` vào đây.
 
 Kết quả ngày 18/10/2026, **chỉ cà chua**: model bệnh 10 lớp, model tìm lá 2 lớp (lá cà chua / lá cây khác). Các tập test chỉ còn ảnh cà chua; số trong ngoặc là model 15 lớp ngày 17/10 chấm trên đúng các ảnh đó:
 
@@ -100,25 +113,27 @@ python predict.py --webcam                                       # chụp bằng
 | `KHOE 85%` | Xác suất bệnh dưới 60%. Số hiện là mức tin cây khỏe |
 | `NGHI 75%` | 60–90%: nghi ngờ, nên ra xem cây |
 | `BENH 97%` | Từ 90% trở lên: có dấu hiệu bệnh. Tên bệnh hiện ở dòng 2 của LCD; mã bệnh (bảng dưới) vẽ trên ảnh `_ai.jpg` |
-| `KHONG THAY LA` | Model tìm lá không thấy chiếc lá nào đủ rõ: ảnh không có lá cà chua, hoặc lá quá nhỏ/quá xa |
+| `KHONG THAY LA` | Model tìm lá không thấy chiếc lá nào đủ rõ: ảnh không có lá cà chua, ớt chuông hay khoai tây, hoặc lá quá nhỏ/quá xa |
 | `ANH QUA TOI` | Ảnh chụp lúc trời tối |
 | `LOI ANH` | Service không đọc được ảnh (thư mục ảnh mẫu trống, file hỏng) |
 
-Chữ trên hiện ở dòng 1 của LCD trong 20 giây. Dòng 2 là tên bệnh gợi ý, ví dụ `Ca chua - moc suong (benh muon)` hoặc `Nghi: Ca chua - nhen do`, hay `La ca chua khoe`. Dòng dài hơn 16 ký tự sẽ chạy chữ.
+Chữ trên hiện ở dòng 1 của LCD trong 20 giây. Dòng 2 là tên bệnh gợi ý, ví dụ `Ca chua - moc suong (benh muon)`, `Nghi: Ot - dom vi khuan`, hay `Khoai tay - khoe`. Dòng dài hơn 16 ký tự sẽ chạy chữ.
 
-**Chỉ dùng cho cà chua** (từ 18/10/2026): model lá chỉ còn 10 lớp lá cà chua (bỏ ớt, khoai tây).
+**3 loại cây, 15 lớp** (từ 17/11/2026; từ 18/10 đến 16/11 model chỉ có 10 lớp cà chua): mỗi loại cây có 1 lớp khỏe và các lớp bệnh dưới đây.
 
-| Mã | Bệnh lá cà chua | Mã | Bệnh lá cà chua |
-|---|---|---|---|
-| TBS | Đốm vi khuẩn | TMV | Virus khảm lá |
-| TEB | Đốm vòng (bệnh sớm) | TSL | Đốm lá Septoria |
-| TLB | Mốc sương (bệnh muộn) | TSM | Nhện đỏ |
-| TLM | Nấm mốc lá | TTS | Đốm mục tiêu |
-|  |  | TYC | Virus xoăn vàng lá |
+| Mã | Bệnh lá cà chua | Mã | Bệnh lá cà chua | Mã | Bệnh lá ớt chuông / khoai tây |
+|---|---|---|---|---|---|
+| TBS | Đốm vi khuẩn | TMV | Virus khảm lá | PBS | Ớt chuông – đốm vi khuẩn |
+| TEB | Đốm vòng (bệnh sớm) | TSL | Đốm lá Septoria | PEB | Khoai tây – đốm vòng (bệnh sớm) |
+| TLB | Mốc sương (bệnh muộn) | TSM | Nhện đỏ | PLB | Khoai tây – mốc sương (bệnh muộn) |
+| TLM | Nấm mốc lá | TTS | Đốm mục tiêu |  |  |
+|  |  | TYC | Virus xoăn vàng lá |  |  |
+
+Dữ liệu ớt chuông và khoai tây ít hơn cà chua. Lớp *khoai tây khỏe* chỉ có 152 ảnh lab và vài lá cắt từ ảnh vườn. Mỗi lớp ớt và khoai tây chỉ có 8–9 ảnh vườn thật để chấm điểm, nên điểm của 2 loại cây này kém tin cậy hơn.
 
 **Tìm lá trước, rồi bỏ phiếu.** Model bệnh chỉ học ảnh từng chiếc lá. Nếu đưa cả khung hình vào, quả cà chua, đất nâu hay thân cây cũng bị đoán thành một bệnh nào đó. Vì vậy:
 
-1. Model YOLO26n khoanh từng chiếc lá và chia 2 loại: lá cà chua / lá cây khác. Chỉ lá cà chua được giữ; lá cây khác, quả, đất, trời, chậu bị bỏ. Lá quá nhỏ (cạnh dưới 32 px) cũng bị bỏ vì quá mờ. Chỉ giữ tối đa 12 lá chắc chắn nhất.
+1. Model YOLO26n khoanh từng chiếc lá và chia 2 loại: lá cây trồng (cà chua, ớt chuông, khoai tây) / lá cây khác (táo, nho, ngô...). Chỉ lá cây trồng được giữ; lá cây khác, quả, đất, trời, chậu bị bỏ. Lá quá nhỏ (cạnh dưới 32 px) cũng bị bỏ vì quá mờ. Chỉ giữ tối đa 12 lá chắc chắn nhất.
 2. Mỗi lá được cắt ra (hình vuông, rộng hơn khung 10%) và chấm điểm riêng.
 3. Bỏ phiếu: cần **ít nhất 2 lá** cùng vượt ngưỡng 90% mới báo `BENH`. Nếu chỉ 1 lá bệnh rõ thì báo `NGHI`. Ảnh chỉ có 1 lá thì lá đó tự quyết. Tên bệnh là bệnh được các lá bị nghi chọn nhiều nhất.
 
@@ -133,7 +148,7 @@ Chế độ phun sương theo kết quả AI do hàm `mist_mode()` trong `servic
 | Kết quả AI | Lệnh | Phun sương |
 |---|---|---|
 | Lá khỏe | `MIST:1` | Bình thường: 30 giây, 30 phút một lần, 8h–16h |
-| Nghi bệnh, hoặc bệnh nấm / vi khuẩn | `MIST:2` | Dừng: lá ướt làm bệnh lan nhanh |
+| Nghi bệnh, hoặc bệnh nấm / vi khuẩn (gồm mọi bệnh ớt chuông và khoai tây) | `MIST:2` | Dừng: lá ướt làm bệnh lan nhanh |
 | Nhện đỏ (≥ 90%) | `MIST:3` | Phun tăng: 15 phút một lần (nhện đỏ sợ ẩm) |
 | Virus khảm lá, xoăn vàng lá | `MIST:1` | Bình thường |
 | Ảnh tối, không thấy lá, lỗi ảnh | (không gửi) | Giữ chế độ đang chạy |
@@ -166,7 +181,7 @@ python service.py --no-mqtt                    # chỉ phân tích, không gửi
 | `SAMPLE_IMAGES_DIR` | `data/test_real` | Thư mục ảnh mẫu, mỗi lần lấy ngẫu nhiên 1 ảnh |
 | `DISEASE_THRESHOLD` / `SUSPECT_THRESHOLD` | 0.9 / 0.6 | Ngưỡng báo "Benh" và "Nghi". Tăng lên nếu báo nhầm nhiều, giảm xuống nếu hay bỏ sót |
 | `MIN_VOTES` | 2 | Số lá phải cùng vượt ngưỡng mới báo "Benh". Tăng lên nếu báo nhầm nhiều |
-| `DET_CONF` | 0.25 | Điểm tin cậy tối thiểu để một khung được coi là lá cà chua. Tăng lên nếu khoanh nhầm vật khác, giảm nếu hay báo `KHONG THAY LA` |
+| `DET_CONF` | 0.25 | Điểm tin cậy tối thiểu để một khung được coi là lá cây trồng. Tăng lên nếu khoanh nhầm vật khác, giảm nếu hay báo `KHONG THAY LA` |
 | `LEAF_MIN_SIDE` / `MAX_LEAVES` | 32 / 12 | Bỏ lá nhỏ hơn 32 px; chỉ chấm tối đa 12 lá mỗi ảnh |
 | `MQTT_HOST` / `MQTT_PORT` | `broker.hivemq.com` / 1883 | MQTT broker. Đổi thì sửa cả `../include/config.h` rồi build lại firmware |
 | `MQTT_TOPIC_PREFIX` | `tuoicaytt/55afb0` | Tiền tố topic, phải giống `MQTT_TOPIC_PREFIX` trong `../include/config.h` |
@@ -187,7 +202,7 @@ python service.py --no-mqtt                    # chỉ phân tích, không gửi
 
 Model chỉ được học từ ảnh trên mạng. Muốn chính xác hơn với một vườn cụ thể thì cần thêm ảnh của chính vườn đó:
 
-1. Chụp ảnh lá cà chua của vườn (ví dụ bằng điện thoại).
+1. Chụp ảnh lá cà chua, ớt chuông hoặc khoai tây của vườn (ví dụ bằng điện thoại).
 2. Cắt riêng phần lá trong ảnh rồi phân loại theo lớp (khỏe, hoặc từng loại bệnh).
 3. Chép vào `data/raw/own/<tên lớp>/`, với tên lớp đúng như trong `config.CLASSES`, ví dụ `data/raw/own/Tomato_healthy/`.
    - `prepare_data.py` tự lấy 70% số ảnh này vào tập train và 30% vào tập `test_real`.

@@ -1,6 +1,6 @@
 # Hệ thống nông nghiệp thông minh tích hợp AI
 
-Đề tài: **Nghiên cứu, phát triển hệ thống nông nghiệp thông minh có tích hợp AI**. Hệ thống tự tưới cây theo độ ẩm đất, phun sương theo giờ, và dùng AI phát hiện bệnh lá cà chua để điều chỉnh việc phun sương.
+Đề tài: **Nghiên cứu, phát triển hệ thống nông nghiệp thông minh có tích hợp AI**. Hệ thống tự tưới cây theo độ ẩm đất, phun sương theo giờ, và dùng AI phát hiện bệnh lá cà chua, ớt chuông, khoai tây để điều chỉnh việc phun sương.
 
 Toàn bộ hệ thống chạy bằng **mô phỏng**, không cần mạch thật:
 
@@ -59,6 +59,7 @@ Hệ thống có thể:
         │   ├── prepare_data.py   # Chuẩn bị dữ liệu
         │   ├── prepare_detector_data.py  # Chuẩn bị dữ liệu tìm lá
         │   ├── config.py         # Cấu hình AI, thư mục ảnh mẫu, MQTT
+        │   ├── colab_train.ipynb # Train cả 2 model trên Google Colab
         │   └── requirements.txt
         └── docs/wokwi.md         # Hướng dẫn mô phỏng, linh kiện, logic điều khiển, kịch bản thử
 ```
@@ -105,6 +106,10 @@ LCD mô phỏng sẽ hiện kết quả AI trong 20 giây, và chế độ phun 
 Cách thao tác với mạch, các lệnh và 11 kịch bản thử (tưới, khóa bơm, hết nước, lỗi cảm biến, phun theo giờ, AI báo bệnh): xem [`docs/wokwi.md`](Projects/heThongTuoiCayTT/docs/wokwi.md).
 
 ## Huấn luyện và đánh giá mô hình AI
+
+**Khuyên dùng Google Colab:** mở [`ai/colab_train.ipynb`](Projects/heThongTuoiCayTT/ai/colab_train.ipynb) trên Colab (**File → Open notebook → GitHub**), bật GPU rồi chạy lần lượt từng ô. Notebook tải dữ liệu, train 2 model 15 lớp (cà chua, ớt chuông, khoai tây), chấm điểm và lưu model vào Google Drive. Ô cuối hướng dẫn chép model về máy.
+
+Train trên máy mình (cần GPU NVIDIA, tải dữ liệu theo `ai/README.md`):
 
 ```bash
 cd Projects/heThongTuoiCayTT/ai

@@ -156,7 +156,7 @@ def mist_mode(result: dict) -> int:
         return MIST_BOOST  # Nhen do so am
     if result["disease_class"] in ("Tomato_Mosaic", "Tomato_Yellow_Curl"):
         return MIST_NORMAL  # Virus lay qua con trung / tiep xuc, do am la khong lam benh nang them
-    return MIST_STOP  # Nam, vi khuan: la uot lam benh lan nhanh
+    return MIST_STOP  # Nam, vi khuan (ke ca ot dom vi khuan, khoai tay benh som/muon): la uot lam benh lan nhanh
 
 
 def lcd_detail(result: dict) -> str:
@@ -164,7 +164,8 @@ def lcd_detail(result: dict) -> str:
     if result["status"] != "ok":
         return ""
     if result["level"] == "healthy":
-        return "La ca chua khoe"
+        # Lop khoe giong nhat cho biet la cay gi, vd "Ot - khoe", "Khoai tay - khoe"
+        return config.CLASS_INFO.get(result["healthy_class"], ("", "La cay khoe"))[1]
     name = config.CLASS_INFO.get(result["disease_class"], ("", ""))[1]
     return name if result["level"] == "diseased" else f"Nghi: {name}"
 

@@ -1,6 +1,7 @@
 """Chuyen bo PlantDoc Object Detection (anh vuon that, moi chiec la co 1 khung) sang dinh dang YOLO
-de train model tim la (train_detector.py). Chi chia 2 lop: 0 = la ca chua, 1 = la cay khac (ot, khoai tay, tao,
-nho...). predict.py chi lay lop 0, nen la cay khac bi bo thay vi bi model benh ca chua doan bua.
+de train model tim la (train_detector.py). Chi chia 2 lop: 0 = la cay trong (ca chua, ot chuong,
+khoai tay), 1 = la cay khac (tao, nho, ngo...). predict.py chi lay lop 0, nen la cay khac bi bo thay vi bi model
+benh doan bua.
 Benh gi la viec cua model benh.
 
 Tai du lieu (1 lan, ~1.9 GB):
@@ -26,8 +27,8 @@ import config
 
 DET_MAX_SIZE = 1024  # Thu nho anh truoc cho train nhanh (YOLO train o 640, anh goc PlantDoc toi 4000 px)
 VAL_RATIO = 0.1
-# Ten lop PlantDoc cua la ca chua (vd "Tomato leaf late blight") -> lop 0; moi ten khac -> lop 1
-TOMATO_PD_NAMES = {pd_name for _, pd_name in config.CLASSES.values() if pd_name}
+# Ten lop PlantDoc cua 3 loai cay trong (vd "Tomato leaf late blight", "Potato leaf") -> lop 0; moi ten khac -> lop 1
+CROP_PD_NAMES = {pd_name for _, pd_name in config.CLASSES.values() if pd_name}
 
 Box = tuple[float, float, float, float]
 
@@ -92,7 +93,7 @@ def main():
         (out / "images" / split).mkdir(parents=True)
         (out / "labels" / split).mkdir(parents=True)
 
-    counts = {"train": [0, 0, 0], "val": [0, 0, 0]}  # [so anh, so la ca chua, so la khac]
+    counts = {"train": [0, 0, 0], "val": [0, 0, 0]}  # [so anh, so la cay trong, so la khac]
     skipped = 0
     for i, (xml_path, img_path) in enumerate(tqdm(jobs, ncols=90)):
         if xml_path.parent.name == "TEST":
@@ -115,7 +116,7 @@ def main():
         except OSError as e:
             print(f" Khong doc duoc anh {img_path}: {e}")
             continue
-        lines = [f"{0 if name in TOMATO_PD_NAMES else 1} "
+        lines = [f"{0 if name in CROP_PD_NAMES else 1} "
                  f"{(x0 + x1) / 2 / w:.6f} {(y0 + y1) / 2 / h:.6f} {(x1 - x0) / w:.6f} {(y1 - y0) / h:.6f}"
                  for name, (x0, y0, x1, y1) in objects]
         (out / "labels" / split / f"pd_{i:05d}.txt").write_text("\n".join(lines) + "\n" if lines else "")
@@ -123,10 +124,10 @@ def main():
         counts[split][1] += sum(line.startswith("0 ") for line in lines)
         counts[split][2] += sum(line.startswith("1 ") for line in lines)
 
-    (out / "leaf.yaml").write_text(f"path: {out}\ntrain: images/train\nval: images/val\nnames:\n  0: tomato_leaf\n  1: other_leaf\n")
+    (out / "leaf.yaml").write_text(f"path: {out}\ntrain: images/train\nval: images/val\nnames:\n  0: crop_leaf\n  1: other_leaf\n")
 
-    for split, (n_img, n_tomato, n_other) in counts.items():
-        print(f"{split:<6} {n_img:>5} anh  {n_tomato:>6} la ca chua  {n_other:>6} la khac")
+    for split, (n_img, n_crop, n_other) in counts.items():
+        print(f"{split:<6} {n_img:>5} anh  {n_crop:>6} la cay trong  {n_other:>6} la khac")
     print(f"Bo qua {skipped} anh co nhan lech kich thuoc")
     print(f"Xong: {out / 'leaf.yaml'}")
 

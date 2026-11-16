@@ -1,4 +1,4 @@
-"""Train model YOLO26n tim tung chiec la trong anh (2 lop: 0 = la ca chua, 1 = la cay khac),
+"""Train model YOLO26n tim tung chiec la trong anh (2 lop: 0 = la cay trong, 1 = la cay khac),
 roi xuat ONNX cho predict.py va app Android.
 
 Can chay prepare_detector_data.py truoc. Can them thu vien: pip install ultralytics (chi de train,
@@ -37,7 +37,7 @@ def main():
         data = config.DETECTOR_DATA_DIR / "leaf.yaml"
         if not data.exists():
             raise SystemExit(f"Chua co {data}, hay chay 'python prepare_detector_data.py' truoc")
-        # Bat dau tu model YOLO26n da hoc san tren COCO (80 loai vat): chi can day them "la ca chua / la cay khac"
+        # Bat dau tu model YOLO26n da hoc san tren COCO (80 loai vat): chi can day them "la cay trong / la cay khac"
         model = YOLO(config.MODELS_DIR / "yolo26n.pt")
         model.train(data=data, epochs=args.epochs, imgsz=config.DET_IMG_SIZE, batch=args.batch,
                     workers=args.workers, cache="disk", patience=15, seed=config.SEED,

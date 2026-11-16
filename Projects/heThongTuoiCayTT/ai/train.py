@@ -1,4 +1,4 @@
-"""Huan luyen CNN EfficientNet-B0 (transfer learning) nhan dien 10 lop benh la ca chua.
+"""Huan luyen CNN EfficientNet-B0 (transfer learning) nhan dien 15 lop benh la ca chua, ot chuong, khoai tay.
 
 Cach chay:  python train.py                              (mac dinh: 3 epoch pha 1 + 12 epoch pha 2, ~22 phut)
             python train.py --epochs-head 1 --epochs 1   (chay thu nhanh ~3 phut)
@@ -23,7 +23,7 @@ def make_loaders(batch_size: int, workers: int):
     val_ds = datasets.ImageFolder(config.DATA_DIR / "val", transform=get_transforms(train=False))
 
     # Can bang lop: moi anh co trong so = 1 / (so anh cua lop no)
-    # -> lop it anh (Tomato_Mosaic) duoc boc nhieu lan hon, lop nhieu anh (Tomato_Yellow_Curl) boc it hon
+    # -> lop it anh (Potato_healthy) duoc boc nhieu lan hon, lop nhieu anh (Tomato_Yellow_Curl) boc it hon
     targets = torch.tensor(train_ds.targets)
     class_counts = torch.bincount(targets)
     sample_weights = 1.0 / class_counts[targets].float()
