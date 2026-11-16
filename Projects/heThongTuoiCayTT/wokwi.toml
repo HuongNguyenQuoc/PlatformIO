@@ -7,3 +7,5 @@ elf = ".pio/build/pico2w/firmware.elf"
 # Mo cong Serial (USB) cua Pico mo phong ra may tinh: rfc2217://localhost:4000
 # (pio device monitor -p rfc2217://localhost:4000 -b 115200)
 rfc2217ServerPort = 4000
+# Cong GDB de go loi firmware dang chay: arm-none-eabi-gdb firmware.elf -ex "target remote localhost:3333"
+gdbServerPort = 3333
