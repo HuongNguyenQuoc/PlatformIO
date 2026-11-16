@@ -143,6 +143,7 @@ Khi chạy `service.py`, dữ liệu được lưu trong thư mục `ai/`:
 ## Xử lý sự cố thường gặp
 
 - **Wokwi báo thiếu firmware:** chạy `pio run` trước khi **Start Simulator**.
+- **Terminal Wokwi đứng ở `Dang ket noi Wi-Fi`, LCD và cảm biến không phản ứng:** kiểm tra `platformio.ini` vẫn cố định core Arduino-Pico 5.2.1. Các bản từ 5.3.0 trở đi bị treo khi kết nối Wi-Fi trên Wokwi (xem `docs/wokwi.md`, mục 2).
 - **Terminal Wokwi không có `Da ket noi MQTT`:** kiểm tra Internet. Broker công khai đôi khi lỗi: đổi `MQTT_HOST` ở cả `include/config.h` và `ai/config.py`.
 - **LCD hiện `--:--`:** Pico chưa lấy được giờ qua NTP (cần Wi-Fi), nên chưa phun sương. Có thể gõ `TIME:hh:mm:ss` để thử.
 - **LCD không hiện kết quả AI:** xem service có in `[Pico] AI OK` không, và tiền tố topic 2 bên có giống nhau không.

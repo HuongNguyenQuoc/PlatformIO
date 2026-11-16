@@ -12,3 +12,6 @@ ai/models/
 ai/logs/
 __pycache__/
 *.pyc
+
+# Nhat ky phien Claude Code (chua toan bo hoi thoai, khong dua len GitHub)
+*.jsonl

@@ -34,6 +34,7 @@ Vì sao dùng MQTT: Wi-Fi giả lập của Wokwi (`Wokwi-GUEST`) có Internet, 
    Hoặc bấm **Build** trên thanh PlatformIO.
    - Lần đầu PlatformIO sẽ tự tải nền tảng Raspberry Pi và core Arduino-Pico, mất vài phút.
    - Nền tảng chính thức của PlatformIO chưa có Pico 2 W, nên `platformio.ini` dùng bản cộng đồng `maxgerhardt/platform-raspberrypi`. Đây là bản mà tài liệu Arduino-Pico khuyên dùng.
+   - `platformio.ini` cố định core Arduino-Pico **5.2.1**, kèm trình biên dịch pico-quick-toolchain 4.1.0 bản cho Windows. Từ bản 5.3.0, `WiFi.begin()` chờ Wi-Fi mà không có giới hạn thời gian. Trên Wokwi, Pico treo ở `Dang ket noi Wi-Fi`, nên LCD, DHT22 và bơm không chạy. Đừng nâng cấp core khi chưa thử lại trên Wokwi. Trên Linux/macOS, đổi link trình biên dịch theo hướng dẫn trong `platformio.ini`.
 2. Nhấn `F1`, chọn **Wokwi: Start Simulator**. Mở `diagram.json` để xem mạch.
 3. Terminal Wokwi hiện Serial của Pico. Đợi tới khi có các dòng `Da ket noi Wi-Fi` và `Da ket noi MQTT`. Khi lấy được giờ qua NTP, LCD hiện giờ Việt Nam.
 
