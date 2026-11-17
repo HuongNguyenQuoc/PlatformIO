@@ -15,3 +15,6 @@ __pycache__/
 
 # Nhat ky phien Claude Code (chua toan bo hoi thoai, khong dua len GitHub)
 *.jsonl
+
+# File nen tai tu Google Drive / Colab (model, anh mau): giai nen vao ai/models, ai/data roi xoa, khong dua len GitHub
+*.zip
