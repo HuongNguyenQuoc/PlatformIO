@@ -568,6 +568,6 @@ void loop() {
     lastLog = now;
     printLog();
   }
-  updateLcd(now);
+  updateLcd(millis());
   delay(5);
 }
