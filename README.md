@@ -4,7 +4,7 @@
 
 Toàn bộ hệ thống chạy bằng **mô phỏng**, không cần mạch thật:
 
-- **Raspberry Pi Pico 2 W** (vi điều khiển có Wi-Fi) chạy trên trình mô phỏng [Wokwi](https://wokwi.com) trong VS Code, gồm cảm biến, LED (thay cho bơm và máy phun sương) và LCD.
+- **Raspberry Pi Pico W** (vi điều khiển có Wi-Fi) chạy trên trình mô phỏng [Wokwi](https://wokwi.com) trong VS Code, gồm cảm biến, LED (thay cho bơm và máy phun sương) và LCD.
 - **AI** chạy trên máy tính.
 - Hai bên trao đổi dữ liệu qua **MQTT**.
 
@@ -26,7 +26,7 @@ Hệ thống có thể:
 ```text
  Wokwi (VS Code)                                  Internet                    Máy tính
 ┌────────────────────────────┐                ┌───────────────────┐       ┌──────────────────────────┐
-│ Raspberry Pi Pico 2 W       │── telemetry ──▶│                   │──────▶│ ai/service.py            │
+│ Raspberry Pi Pico W         │── telemetry ──▶│                   │──────▶│ ai/service.py            │
 │  cảm biến đất, DHT22,       │   mỗi 5 giây   │ broker.hivemq.com │       │  ghi logs/sensors.csv    │
 │  ánh sáng, mực nước bồn     │                │      (MQTT)       │       │  AI phân tích ảnh mẫu    │
 │  LED bơm / phun / cảnh báo  │◀── cmd ────────│                   │◀──────│  gửi MIST: và AI:        │
@@ -46,8 +46,8 @@ Hệ thống có thể:
         ├── platformio.ini        # Build firmware Pico
         ├── wokwi.toml            # Cấu hình trình mô phỏng Wokwi
         ├── diagram.json          # Sơ đồ mạch mô phỏng
-        ├── src/main.cpp          # Firmware Pico 2 W: cảm biến, LED, LCD, Wi-Fi, NTP, MQTT
-        ├── include/config.h      # Chân Pico 2 W, Wi-Fi, MQTT
+        ├── src/main.cpp          # Firmware Pico W: cảm biến, LED, LCD, Wi-Fi, NTP, MQTT
+        ├── include/config.h      # Chân Pico W, Wi-Fi, MQTT
         ├── lib/FarmCore/         # Logic tưới và phun sương (C++ thuần, không phụ thuộc phần cứng)
         ├── ai/                   # AI phát hiện bệnh lá
         │   ├── service.py        # Dịch vụ: phân tích ảnh, gửi kết quả cho Pico qua MQTT, ghi log
@@ -133,7 +133,7 @@ Chi tiết về dữ liệu, các lớp bệnh, ngưỡng AI, kết quả đánh
 | Muốn đổi | Sửa ở đâu |
 |---|---|
 | Ngưỡng tưới, thời gian bơm, lịch phun sương, ngưỡng độ ẩm không khí, kích thước bồn | Đầu file `src/main.cpp` |
-| Chân Pico 2 W | `include/config.h` (sửa cả `diagram.json`) |
+| Chân Pico W | `include/config.h` (sửa cả `diagram.json`) |
 | MQTT broker, tiền tố topic | `include/config.h` **và** `ai/config.py` (2 nơi phải giống nhau) |
 | Ngưỡng AI, giờ phân tích, thư mục ảnh mẫu | `ai/config.py` |
 
@@ -149,6 +149,7 @@ Khi chạy `service.py`, dữ liệu được lưu trong thư mục `ai/`:
 
 - **Wokwi báo thiếu firmware:** chạy `pio run` trước khi **Start Simulator**.
 - **Terminal Wokwi đứng ở `Dang ket noi Wi-Fi`, LCD và cảm biến không phản ứng:** kiểm tra `platformio.ini` vẫn cố định core Arduino-Pico 5.2.1. Các bản từ 5.3.0 trở đi bị treo khi kết nối Wi-Fi trên Wokwi (xem `docs/wokwi.md`, mục 2).
+- **LCD hiện ký tự lạ, hoặc mực nước bồn nhảy 77% ↔ 0%:** kiểm tra mạch trong `diagram.json` là `board-pi-pico-w` và `platformio.ini` là `board = rpipicow`. Hai lỗi này do Wokwi mô phỏng chip của Pico 2 W (RP2350) chưa chuẩn (xem `docs/wokwi.md`, mục 3).
 - **Terminal Wokwi không có `Da ket noi MQTT`:** kiểm tra Internet. Broker công khai đôi khi lỗi: đổi `MQTT_HOST` ở cả `include/config.h` và `ai/config.py`.
 - **LCD hiện `--:--`:** Pico chưa lấy được giờ qua NTP (cần Wi-Fi), nên chưa phun sương. Có thể gõ `TIME:hh:mm:ss` để thử.
 - **LCD không hiện kết quả AI:** xem service có in `[Pico] AI OK` không, và tiền tố topic 2 bên có giống nhau không.

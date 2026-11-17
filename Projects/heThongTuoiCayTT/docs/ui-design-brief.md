@@ -6,7 +6,7 @@ Tài liệu này chuẩn bị nội dung cho Figma. Phạm vi các màn hình ap
 
 ## 1. Mục tiêu và trình tự
 
-- Hệ thống nông nghiệp thông minh chạy mô phỏng bằng Pico 2 W trên Wokwi, AI chạy trên máy tính hoặc điện thoại.
+- Hệ thống nông nghiệp thông minh chạy mô phỏng bằng Pico W trên Wokwi, AI chạy trên máy tính hoặc điện thoại.
 - App và web dùng chung thuật ngữ, màu trạng thái và cách trình bày số liệu.
 - Rà soát các màn hình app cần sửa → thiết kế các luồng và màn hình trên Figma → triển khai giao diện theo thiết kế.
 - Web theo hướng đã chọn: Next.js + FastAPI + SQLite. Desktop vẫn là một thành phần cần hoàn thiện riêng trong yêu cầu Firmware + Web + Mobile + Desktop.
@@ -16,7 +16,7 @@ Tài liệu này chuẩn bị nội dung cho Figma. Phạm vi các màn hình ap
 
 | Thành phần | Hiện có | Điều cần xử lý khi thiết kế |
 | --- | --- | --- |
-| Firmware | Pico 2 W, cảm biến, tưới tự động, phun theo giờ, LCD, MQTT | Dùng đúng các số đo và lệnh đang hỗ trợ |
+| Firmware | Pico W, cảm biến, tưới tự động, phun theo giờ, LCD, MQTT | Dùng đúng các số đo và lệnh đang hỗ trợ |
 | App Android | Trang chủ, camera điện thoại, chọn ảnh, kết quả AI, lịch sử, cài đặt | Trang chủ và cài đặt vẫn phụ thuộc ESP32-CAM qua HTTP |
 | AI Python | Phân tích ảnh mẫu, gửi kết quả và chế độ phun qua MQTT | Kết quả trên MQTT hiện là hai dòng LCD, chưa phải bản ghi đầy đủ kèm ảnh |
 | Web | Chưa có mã nguồn web trong repo | Thiết kế trước trang tổng quan và lịch sử |
@@ -24,7 +24,7 @@ Tài liệu này chuẩn bị nội dung cho Figma. Phạm vi các màn hình ap
 Nguồn đối chiếu:
 
 - `src/main.cpp`: `handleCommand()` và `publishTelemetry()`.
-- `include/config.h`: Pico 2 W và cấu hình MQTT.
+- `include/config.h`: Pico W và cấu hình MQTT.
 - `ai/config.py`, `ai/service.py`: lớp nhận diện và giao tiếp AI.
 - Repo bên cạnh `DetectDisease`: `HomeFragment.kt`, `EspClient.kt`, `DetectionRecord.kt`, `FreshnessClassifier.kt`, các layout trong `main/res/layout/`.
 

@@ -1,9 +1,9 @@
-// Cau hinh phan cung va mang cua Raspberry Pi Pico 2 W. Doi chan o day thi sua ca diagram.json (so do mach Wokwi).
+// Cau hinh phan cung va mang cua Raspberry Pi Pico W. Doi chan o day thi sua ca diagram.json (so do mach Wokwi).
 #pragma once
 
 #include <stdint.h>
 
-// ===== Chan Raspberry Pi Pico 2 W (so GPIO, vd 26 = chan GP26) =====
+// ===== Chan Raspberry Pi Pico W (so GPIO, vd 26 = chan GP26) =====
 constexpr int SOIL_PIN = 26;        // Thanh truot thay cam bien do am dat (ADC0)
 constexpr int LIGHT_PIN = 27;       // Cam bien anh sang (quang tro), chan AO (ADC1)
 constexpr int DHT_PIN = 15;         // DHT22: nhiet do + do am khong khi

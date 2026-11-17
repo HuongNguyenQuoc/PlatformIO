@@ -2,14 +2,14 @@
 
 Toàn bộ hệ thống chạy bằng mô phỏng, không cần mạch thật:
 
-- **Raspberry Pi Pico 2 W** chạy trên Wokwi trong VS Code, gồm cảm biến, LED (thay cho bơm và máy phun sương) và LCD.
+- **Raspberry Pi Pico W** chạy trên Wokwi trong VS Code, gồm cảm biến, LED (thay cho bơm và máy phun sương) và LCD.
 - **AI** chạy trên máy tính (`ai/service.py`).
 - Hai bên nói chuyện qua **MQTT**, qua một broker công khai trên Internet.
 
 ```text
  Wokwi (VS Code)                                  Internet                    Máy tính
 ┌────────────────────────────┐                ┌───────────────────┐       ┌──────────────────────────┐
-│ Raspberry Pi Pico 2 W       │── telemetry ──▶│                   │──────▶│ ai/service.py            │
+│ Raspberry Pi Pico W         │── telemetry ──▶│                   │──────▶│ ai/service.py            │
 │  cảm biến đất, DHT22,       │   mỗi 5 giây   │ broker.hivemq.com │       │  ghi logs/sensors.csv    │
 │  ánh sáng, mực nước bồn     │                │      (MQTT)       │       │  AI phân tích ảnh mẫu    │
 │  LED bơm / phun / cảnh báo  │◀── cmd ────────│                   │◀──────│  gửi MIST: và AI:        │
@@ -33,7 +33,7 @@ Vì sao dùng MQTT: Wi-Fi giả lập của Wokwi (`Wokwi-GUEST`) có Internet, 
    ```
    Hoặc bấm **Build** trên thanh PlatformIO.
    - Lần đầu PlatformIO sẽ tự tải nền tảng Raspberry Pi và core Arduino-Pico, mất vài phút.
-   - Nền tảng chính thức của PlatformIO chưa có Pico 2 W, nên `platformio.ini` dùng bản cộng đồng `maxgerhardt/platform-raspberrypi`. Đây là bản mà tài liệu Arduino-Pico khuyên dùng.
+   - Nền tảng chính thức của PlatformIO không có core Arduino-Pico (cần cho Wi-Fi của Pico W), nên `platformio.ini` dùng bản cộng đồng `maxgerhardt/platform-raspberrypi`. Đây là bản mà tài liệu Arduino-Pico khuyên dùng.
    - `platformio.ini` cố định core Arduino-Pico **5.2.1**, kèm trình biên dịch pico-quick-toolchain 4.1.0 bản cho Windows. Từ bản 5.3.0, `WiFi.begin()` chờ Wi-Fi mà không có giới hạn thời gian. Trên Wokwi, Pico treo ở `Dang ket noi Wi-Fi`, nên LCD, DHT22 và bơm không chạy. Đừng nâng cấp core khi chưa thử lại trên Wokwi. Trên Linux/macOS, đổi link trình biên dịch theo hướng dẫn trong `platformio.ini`.
 2. Nhấn `F1`, chọn **Wokwi: Start Simulator**. Mở `diagram.json` để xem mạch.
 3. Terminal Wokwi hiện Serial của Pico. Đợi tới khi có các dòng `Da ket noi Wi-Fi` và `Da ket noi MQTT`. Khi lấy được giờ qua NTP, LCD hiện giờ Việt Nam.
@@ -42,7 +42,7 @@ Sửa code thì chạy lại `pio run`. Nếu mô phỏng không tự nạp firm
 
 ## 3. Linh kiện trong mạch
 
-| Linh kiện (`id`) | Chân Pico 2 W | Vai trò |
+| Linh kiện (`id`) | Chân Pico W | Vai trò |
 |---|---|---|
 | Thanh trượt (`pot1`) | GP26 (ADC0) | Độ ẩm đất. Vị trí thanh trượt gần bằng độ ẩm (%). Kéo về trái cùng (dưới ~5%) để giả lập tuột dây cảm biến |
 | DHT22 (`dht1`) | GP15 | Nhiệt độ, độ ẩm không khí. Bấm vào linh kiện để chỉnh |
@@ -55,8 +55,22 @@ Sửa code thì chạy lại `pio run`. Nếu mô phỏng không tự nạp firm
 | Nút xanh lá (`btn1`) | GP14 | Mở khóa bơm |
 
 - Chân được khai báo trong [`include/config.h`](../include/config.h). Đổi chân thì sửa cả `diagram.json`.
-- Pico 2 W chỉ có 3 chân đọc analog (GP26, GP27, GP28): 2 chân đang dùng, còn trống GP28.
-- Wokwi chỉ mô phỏng 1 trong 2 nhân của RP2350. Firmware này chỉ dùng 1 nhân nên không bị ảnh hưởng.
+- Pico W chỉ có 3 chân đọc analog (GP26, GP27, GP28): 2 chân đang dùng, còn trống GP28.
+
+**Vì sao dùng Pico W (RP2040) mà không dùng Pico 2 W (RP2350):** từ 13/11 đến 17/11/2026 hệ thống chạy trên Pico 2 W. Khi đó Wokwi gây ra 2 lỗi mà mạch thật không có:
+
+- LCD hiện ký tự lạ hoặc để trống. Lệnh ghi I2C tới LCD thỉnh thoảng bị lỗi hết giờ, nên LCD mất nửa ký tự (LCD nhận mỗi ký tự thành 2 nửa, 4 bit một lần), và từ đó các ký tự sau bị ghép sai.
+- Mực nước bồn nhảy 77% ↔ 0%, kéo theo bơm bật/tắt liên tục. Cảm biến đo đúng mọi lần (1765 µs = 30 cm), nhưng phép so sánh số thực (`float`) đôi khi ra kết quả sai.
+
+Một chương trình thử chỉ gồm LCD, HC-SR04 và DHT22 cho kết quả như sau:
+
+| Bo mạch | Lỗi ghi LCD | Mực nước tính bằng số thực |
+|---|---|---|
+| Pico 2 W, có Wi-Fi + MQTT | 23 lỗi / 28 giây | sai 4/11 lần |
+| Pico 2 W, không bật chip Wi-Fi | 16 lỗi / 12 giây | sai 6/12 lần |
+| **Pico W, có Wi-Fi + MQTT** | **0 lỗi / 114 giây** | **sai 0/106 lần** |
+
+Vì vậy lỗi nằm ở phần Wokwi mô phỏng chip RP2350, không phải do Wi-Fi hay code. Hai bo mạch có chân giống nhau, nên đổi sang Pico W chỉ cần sửa tên bo mạch trong `diagram.json` và `platformio.ini`.
 
 ## 4. Màn hình LCD
 

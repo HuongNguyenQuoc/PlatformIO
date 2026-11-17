@@ -1,4 +1,4 @@
-// He thong tuoi cay thong minh co AI - firmware Raspberry Pi Pico 2 W, chay tren trinh mo phong Wokwi.
+// He thong tuoi cay thong minh co AI - firmware Raspberry Pi Pico W, chay tren trinh mo phong Wokwi.
 //
 // Doc cam bien (do am dat, nhiet do / do am khong khi, anh sang, muc nuoc be), tu tuoi va phun suong,
 // hien len LCD, gui so lieu qua MQTT cho may tinh chay AI (ai/service.py) va nhan lai ket qua AI / lenh.
@@ -503,7 +503,7 @@ void setup() {
   while (!Serial && millis() - serialWait < 2000) {
     delay(10);
   }
-  Serial.println("\nHe thong tuoi cay thong minh - Raspberry Pi Pico 2 W (Wokwi)");
+  Serial.println("\nHe thong tuoi cay thong minh - Raspberry Pi Pico W (Wokwi)");
 
   pinMode(PUMP_PIN, OUTPUT);
   pinMode(MIST_PIN, OUTPUT);

@@ -1,6 +1,6 @@
 # AI phát hiện bệnh cây – Hệ thống tưới cây TT
 
-Máy tính dùng 2 model để phân tích ảnh lá **cà chua, ớt chuông và khoai tây**: YOLO26n tìm từng chiếc lá, rồi CNN (EfficientNet-B0, PyTorch) chấm bệnh từng lá. Kết quả được gửi qua MQTT cho Pico 2 W đang chạy mô phỏng trên Wokwi. Pico 2 W hiện kết quả lên LCD 20 giây, rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương). Khi lá bị bệnh nấm hoặc vi khuẩn, Pico 2 W dừng phun sương.
+Máy tính dùng 2 model để phân tích ảnh lá **cà chua, ớt chuông và khoai tây**: YOLO26n tìm từng chiếc lá, rồi CNN (EfficientNet-B0, PyTorch) chấm bệnh từng lá. Kết quả được gửi qua MQTT cho Pico W đang chạy mô phỏng trên Wokwi. Pico W hiện kết quả lên LCD 20 giây, rồi quay về màn hình chính (độ ẩm, giờ, bơm, phun sương). Khi lá bị bệnh nấm hoặc vi khuẩn, Pico W dừng phun sương.
 
 Hệ thống chỉ chạy mô phỏng, không có camera thật. Mỗi lần phân tích, service lấy ngẫu nhiên một ảnh trong thư mục ảnh mẫu (mặc định `data/test_real`).
 
@@ -9,7 +9,7 @@ data/test_real/ (ảnh mẫu) ──▶ Máy tính: ai/service.py
                                 ├─ predict.py: YOLO tìm lá, CNN chấm từng lá, bỏ phiếu
                                 ├─ captures/<ngày>/  ảnh đã phân tích + ảnh có khung
                                 ├─ logs/ai_results.csv, logs/sensors.csv
-                                └─ MQTT "MIST:2", "AI:BENH 97%|Ca chua - moc suong" ──▶ Pico 2 W (Wokwi) ──▶ LCD (20 giây)
+                                └─ MQTT "MIST:2", "AI:BENH 97%|Ca chua - moc suong" ──▶ Pico W (Wokwi) ──▶ LCD (20 giây)
 ```
 
 ## Các file
@@ -26,8 +26,8 @@ data/test_real/ (ảnh mẫu) ──▶ Máy tính: ai/service.py
 | `train.py` | Train 2 pha (đóng băng backbone, rồi fine-tune toàn bộ) và lưu `models/best.pt` |
 | `evaluate.py` | Chấm điểm trên tập test: accuracy, F1, ma trận nhầm lẫn, chỉ số khỏe/bệnh |
 | `predict.py` | Phân tích ảnh hoặc webcam: tìm lá, chấm từng lá, bỏ phiếu, vẽ khung từng lá |
-| `service.py` | Chạy liên tục: lấy ảnh mẫu theo giờ, phân tích, ghi log, gửi kết quả cho Pico 2 W qua MQTT |
-| `../src/main.cpp` | Pico 2 W (Wokwi): cảm biến, tưới, phun sương theo giờ và theo AI, LCD, MQTT. Xem `../docs/wokwi.md` |
+| `service.py` | Chạy liên tục: lấy ảnh mẫu theo giờ, phân tích, ghi log, gửi kết quả cho Pico W qua MQTT |
+| `../src/main.cpp` | Pico W (Wokwi): cảm biến, tưới, phun sương theo giờ và theo AI, LCD, MQTT. Xem `../docs/wokwi.md` |
 
 Mọi lệnh Python bên dưới đều chạy trong thư mục `ai/`, sau khi đã bật venv:
 
@@ -168,11 +168,11 @@ Dữ liệu ớt chuông và khoai tây ít hơn cà chua. Lớp *khoai tây kh�
 
 Ảnh `*_ai.jpg` vẽ khung đỏ cho lá bệnh, cam cho lá nghi ngờ, xanh cho lá khỏe.
 
-## 3. Pico 2 W mô phỏng trên Wokwi
+## 3. Pico W mô phỏng trên Wokwi
 
-Firmware Pico 2 W nằm ở `../src/main.cpp` và `../lib/FarmCore/`. Cách chạy mô phỏng, linh kiện, LCD, logic tưới và phun sương, các lệnh MQTT: xem [`../docs/wokwi.md`](../docs/wokwi.md).
+Firmware Pico W nằm ở `../src/main.cpp` và `../lib/FarmCore/`. Cách chạy mô phỏng, linh kiện, LCD, logic tưới và phun sương, các lệnh MQTT: xem [`../docs/wokwi.md`](../docs/wokwi.md).
 
-Chế độ phun sương theo kết quả AI do hàm `mist_mode()` trong `service.py` quyết định, rồi gửi cho Pico 2 W bằng lệnh `MIST:<1-3>`:
+Chế độ phun sương theo kết quả AI do hàm `mist_mode()` trong `service.py` quyết định, rồi gửi cho Pico W bằng lệnh `MIST:<1-3>`:
 
 | Kết quả AI | Lệnh | Phun sương |
 |---|---|---|
@@ -184,19 +184,19 @@ Chế độ phun sương theo kết quả AI do hàm `mist_mode()` trong `servic
 
 ## 4. Chạy dịch vụ
 
-Bật mô phỏng Pico 2 W trên Wokwi trước (xem `../docs/wokwi.md`), rồi chạy:
+Bật mô phỏng Pico W trên Wokwi trước (xem `../docs/wokwi.md`), rồi chạy:
 
 ```bash
-python service.py --once                       # phân tích 1 ảnh ngẫu nhiên, gửi cho Pico 2 W rồi thoát
+python service.py --once                       # phân tích 1 ảnh ngẫu nhiên, gửi cho Pico W rồi thoát
 python service.py --interval 2                 # chạy liên tục, 2 phút 1 lần (để demo)
 python service.py                              # chạy liên tục: phân tích ngay, sau đó theo giờ trong config
 python service.py --once --image anh.jpg       # dùng ảnh chỉ định
 python service.py --image-dir thu_muc_anh      # lấy ảnh ngẫu nhiên từ thư mục khác (tìm cả thư mục con)
-python service.py --no-mqtt                    # chỉ phân tích, không gửi cho Pico 2 W
+python service.py --no-mqtt                    # chỉ phân tích, không gửi cho Pico W
 ```
 
-- Service kết nối tới MQTT broker `config.MQTT_HOST`. Mỗi phút nó in một dòng số liệu Pico 2 W gửi lên, dạng `[Pico] 14:05:12  Dat 57% ...`, và in câu trả lời của Pico 2 W, ví dụ `[Pico] AI OK`.
-- Chế độ phun sương được gửi lại mỗi 60 giây. Nhờ vậy, nếu mô phỏng Pico 2 W khởi động lại thì vẫn lấy lại được chế độ.
+- Service kết nối tới MQTT broker `config.MQTT_HOST`. Mỗi phút nó in một dòng số liệu Pico W gửi lên, dạng `[Pico] 14:05:12  Dat 57% ...`, và in câu trả lời của Pico W, ví dụ `[Pico] AI OK`.
+- Chế độ phun sương được gửi lại mỗi 60 giây. Nhờ vậy, nếu mô phỏng Pico W khởi động lại thì vẫn lấy lại được chế độ.
 - Lưu trữ:
   - `captures/<ngày>/<giờ>.jpg` là ảnh đã phân tích, `<giờ>_ai.jpg` là ảnh có vẽ khung.
   - `logs/ai_results.csv` ghi kết quả từng lần.
