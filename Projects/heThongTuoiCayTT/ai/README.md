@@ -66,9 +66,38 @@ python evaluate.py --scenes       # chấm cả quy trình predict.py (tìm lá 
 
 Ảnh nào trùng với `test_real` đều bị loại khỏi dữ liệu train của cả 2 model, để điểm chấm vẫn là điểm thật.
 
-> **Model hiện tại có 15 lớp (từ 17/11/2026) và chưa được chấm điểm.** Các bảng dưới đây là kết quả của model cũ chỉ có cà chua. Sau khi chạy notebook, chép bảng điểm trong `evaluate.log` và `evaluate_scenes.log` vào đây.
+### Kết quả model đang dùng (17/11/2026, 3 loại cây, train trên Colab)
 
-Kết quả ngày 18/10/2026, **chỉ cà chua**: model bệnh 10 lớp, model tìm lá 2 lớp (lá cà chua / lá cây khác). Các tập test chỉ còn ảnh cà chua; số trong ngoặc là model 15 lớp ngày 17/10 chấm trên đúng các ảnh đó:
+Model bệnh 15 lớp, model tìm lá 2 lớp (lá cây trồng / lá cây khác). Chi tiết xem `logs/evaluate.log` và `logs/evaluate_scenes.log`.
+
+| Tập | Số ảnh | Đoán đúng tên bệnh (15 lớp) | Báo "Benh" đúng (ngưỡng 90%) |
+|---|---|---|---|
+| `test_pv` (PlantVillage) | 2279 | 99,6% | phát hiện 1955/1957 ảnh bệnh, báo nhầm 0/322 ảnh khỏe |
+| `test_real` (PlantDoc, cả ảnh) | 102 | **61,8%** | phát hiện 75/86 ảnh bệnh, báo nhầm 0/16 ảnh khỏe |
+| `test_leaf` (từng lá cắt từ ảnh test_real) | 264 | **63,6%** | phát hiện 180/226 lá bệnh, báo nhầm 1/38 lá khỏe |
+
+Theo từng loại cây trên `test_real` (đoán đúng tên lớp):
+
+| Cây | Đúng tên lớp | Đoán đúng loại cây | Ghi chú |
+|---|---|---|---|
+| Ớt chuông | 14/17 | 14/17 | Ảnh khỏe đúng cả 8/8. 3 ảnh đốm vi khuẩn bị đoán thành bệnh cà chua |
+| Khoai tây | 6/16 | 13/16 | Hay nhầm bệnh sớm ↔ bệnh muộn (7 ảnh). Cả 2 đều dừng phun sương nên không ảnh hưởng điều khiển |
+| Cà chua | 43/69 (62,3%) | 62/69 | Model 10 lớp chỉ cà chua (18/10) đạt 72,5% trên đúng 69 ảnh này. Thêm ớt và khoai tây làm 7 ảnh cà chua bị đoán sang cây khác |
+
+**Cả quy trình** (`evaluate.py --scenes`: tìm lá → chấm từng lá → bỏ phiếu) trên 102 ảnh `test_real`:
+
+| | Bệnh | Nghi | Khỏe | Không thấy lá |
+|---|---|---|---|---|
+| 86 ảnh bệnh | 73 | 9 | 2 | 2 |
+| 16 ảnh khỏe | 1 | 0 | 15 | 0 |
+
+- Đúng tên lớp: 66/102 (64,7%), gần bằng model 15 lớp cũ ngày 17/10 (bệnh 75/10/1, khỏe 15 + 1 báo nhầm).
+- Với việc điều khiển phun sương, 82/86 ảnh bệnh được báo `BENH` hoặc `NGHI` (dừng phun), và 15/16 ảnh khỏe vẫn phun bình thường.
+- Lớp *khoai tây khỏe*, *nhện đỏ* và *đốm mục tiêu* không có ảnh vườn thật trong `test_real`, nên mới chỉ được chấm trên ảnh lab.
+
+### Kết quả cũ (18/10/2026, chỉ cà chua)
+
+Model bệnh 10 lớp, model tìm lá 2 lớp (lá cà chua / lá cây khác). Các tập test chỉ còn ảnh cà chua; số trong ngoặc là model 15 lớp ngày 17/10 chấm trên đúng các ảnh đó:
 
 | Tập | Số ảnh | Đoán đúng tên bệnh (10 lớp) | Báo "Benh" đúng (ngưỡng 90%) |
 |---|---|---|---|
@@ -91,7 +120,7 @@ Kết quả ngày 18/10/2026, **chỉ cà chua**: model bệnh 10 lớp, model t
 - Ảnh camera chụp nhầm trần nhà: trước báo `NGHI 75%`, nay là `KHONG THAY LA`.
 
 - Ngoài vườn, model **phân biệt khỏe hay bệnh khá tốt**, nhưng **hay nhầm giữa các bệnh trông giống nhau**.
-  - Ví dụ: đốm vi khuẩn bị nhầm thành Septoria, khảm lá bị nhầm thành nấm mốc lá.
+  - Ví dụ: đốm vi khuẩn bị nhầm thành Septoria, khảm lá bị nhầm thành nấm mốc lá, khoai tây bệnh sớm bị nhầm thành bệnh muộn.
   - Vì vậy, LCD chỉ báo mức Khỏe / Nghi / Bệnh. Tên bệnh (in ra màn hình và trên app) chỉ là **gợi ý**. Xem chi tiết trong `logs/evaluate.log`.
 - **Vì sao ngưỡng "Benh" đặt cao (90%):** ảnh lá khỏe ngoài vườn hay bị chấm xác suất bệnh 60–90%. Với ngưỡng 90%, các ảnh đó rơi vào mức "Nghi" thay vì "Benh". Ngưỡng được chọn dựa trên rất ít ảnh khỏe (8 ảnh cà chua), nên khi có ảnh vườn của bạn, hãy chỉnh lại.
 

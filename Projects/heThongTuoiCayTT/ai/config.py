@@ -67,9 +67,8 @@ MAX_SIZE = 512 # kich thuoc toi da cua anh dau vao cho model
 MODEL_PATH = MODELS_DIR / "best.pt"
 DETECTOR_PATH = MODELS_DIR / "leaf_detector.onnx"  # Model YOLO tim tung chiec la (train_detector.py)
 DET_IMG_SIZE = 640       # Anh dua vao model tim la: 640x640 (thu nho giu ti le, phan thua to xam)
-# Nguong chon theo test_real (anh that) voi model 10 lop ca chua ngay 18/10 (python evaluate.py --scenes):
-# 61 anh benh -> 56 "Benh", 3 "Nghi", 2 "Khong thay la"; 8 anh khoe -> 4 "Khoe", 3 "Nghi", 1 "Khong thay la".
-# Model 15 lop (3 loai cay) can cham lai bang evaluate.py --scenes roi chinh cac nguong duoi day neu can.
+# Nguong chon theo test_real (anh that). Model 15 lop (3 loai cay) ngay 17/11 (python evaluate.py --scenes):
+# 86 anh benh -> 73 "Benh", 9 "Nghi", 2 "Khoe", 2 "Khong thay la"; 16 anh khoe -> 15 "Khoe", 1 "Benh".
 DISEASE_THRESHOLD = 0.9  # Xac suat benh >= 90% thi bao "Benh"
 SUSPECT_THRESHOLD = 0.6  # 60-90% thi bao "Nghi" (nghi ngo, nen ra xem cay), duoi 60% la "Khoe"
 DET_CONF = 0.25          # Model tim la: khung la cay trong co diem tin cay duoi muc nay thi bo
