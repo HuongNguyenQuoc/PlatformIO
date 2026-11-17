@@ -12,7 +12,7 @@
       "id": "pot1",
       "top": 280,
       "left": 150,
-      "attrs": { "travelLength": "30", "value": "60" }
+      "attrs": { "travelLength": "30", "value": "640" }
     },
     { "type": "wokwi-hc-sr04", "id": "sonar1", "top": 260, "left": -330, "attrs": { "distance": "30" } },
     { "type": "wokwi-pushbutton", "id": "btn1", "top": 170, "left": -200, "attrs": { "color": "green" } },
